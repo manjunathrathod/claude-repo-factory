@@ -38,6 +38,20 @@ func (c ProjectConfig) Validate(catalog Catalog) error {
 	if err := validateBranch(c.DefaultBranch); err != nil {
 		errs = append(errs, err)
 	}
+	if err := ValidateRemote(c.Remote); err != nil {
+		errs = append(errs, err)
+	}
+	// Free-text fields reach the confirmation summary and the generated
+	// README, so they may not carry characters that forge output lines.
+	for _, field := range []struct{ name, value string }{
+		{"Description", c.Description},
+		{"Author", c.Author},
+		{"License", c.License},
+	} {
+		if err := ValidateNoControlCharacters(field.name, field.value); err != nil {
+			errs = append(errs, err)
+		}
+	}
 
 	if catalog == nil {
 		errs = append(errs, newFieldError(ErrInvalidValue, "Catalog", "",

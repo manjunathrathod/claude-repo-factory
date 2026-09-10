@@ -164,3 +164,108 @@ func TestValidProjectNameIsAlwaysASingleSegment(t *testing.T) {
 		}
 	}
 }
+
+func TestValidateNoControlCharacters(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		wantErr bool
+	}{
+		{name: "plain text", input: "Payment service"},
+		{name: "punctuation", input: "A service: fast, safe & tested (v2)"},
+		{name: "non-ascii letters", input: "Zahlungsdienst für Kunden"},
+		{name: "empty", input: ""},
+
+		{name: "newline", input: "Widget\nInitialize Git: No", wantErr: true},
+		{name: "carriage return", input: "Widget\rOverwritten", wantErr: true},
+		{name: "tab", input: "Widget\tvalue", wantErr: true},
+		{name: "ANSI escape", input: "Widget\x1b[2J", wantErr: true},
+		{name: "NUL", input: "Widget\x00", wantErr: true},
+		{name: "backspace", input: "Widget\b\b\b", wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := config.ValidateNoControlCharacters("Description", tt.input)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("ValidateNoControlCharacters(%q) = nil, want an error", tt.input)
+				}
+				// The rejected value must be escaped in the message, never
+				// replayed, or the error output could be forged instead.
+				if strings.Contains(err.Error(), "\n") {
+					t.Errorf("error message replays a raw newline: %q", err.Error())
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ValidateNoControlCharacters(%q) = %v, want nil", tt.input, err)
+			}
+		})
+	}
+}
+
+func TestValidateRemote(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		wantErr bool
+	}{
+		{name: "empty means no remote", input: ""},
+		{name: "https", input: "https://github.com/acme/widget.git"},
+		{name: "ssh scheme", input: "ssh://git@github.com/acme/widget.git"},
+		{name: "scp style", input: "git@github.com:acme/widget.git"},
+		{name: "git scheme", input: "git://example.com/widget.git"},
+		{name: "file scheme", input: "file:///srv/git/widget.git"},
+		{name: "posix path", input: "/srv/git/widget.git"},
+		{name: "relative path", input: "./mirror"},
+		{name: "windows path", input: `C:\git\widget`},
+
+		{name: "leading dash reads as a git flag", input: "--upload-pack=calc", wantErr: true},
+		{name: "single dash", input: "-o", wantErr: true},
+		{name: "ext transport executes a command", input: "ext::sh -c whoami", wantErr: true},
+		{name: "ext transport uppercase", input: "EXT::sh -c whoami", wantErr: true},
+		{name: "fd transport", input: "fd::7", wantErr: true},
+		{name: "newline", input: "https://example.com\nrm -rf", wantErr: true},
+		{name: "bare word is not a remote", input: "origin", wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := config.ValidateRemote(tt.input)
+			if tt.wantErr && err == nil {
+				t.Fatalf("ValidateRemote(%q) = nil, want an error", tt.input)
+			}
+			if !tt.wantErr && err != nil {
+				t.Fatalf("ValidateRemote(%q) = %v, want nil", tt.input, err)
+			}
+		})
+	}
+}
+
+func TestValidateOutputDirectoryRejectsWindowsHazards(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+	}{
+		{name: "device name alone", input: "NUL"},
+		{name: "device name lowercase", input: "nul"},
+		{name: "device name in a segment", input: "projects/CON/widget"},
+		{name: "device name with extension", input: "projects/nul.txt"},
+		{name: "UNC share", input: "//server/share/widget"},
+		{name: "UNC share backslashes", input: `\\server\share\widget`},
+		{name: "device namespace", input: `\\.\NUL`},
+		{name: "long path namespace", input: `\\?\C:\widget`},
+		{name: "drive relative", input: "C:widget"},
+		{name: "segment ending in a dot", input: "projects/widget."},
+		{name: "segment ending in a space", input: "projects/widget "},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := config.ValidateOutputDirectory(tt.input); err == nil {
+				t.Fatalf("ValidateOutputDirectory(%q) = nil, want an error", tt.input)
+			}
+		})
+	}
+}

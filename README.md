@@ -38,55 +38,121 @@ claude-repo-factory languages
 ```
 
 ```
-ID         NAME                  STATUS   PROJECT TYPES                SUMMARY
-dotnet     .NET                  planned  -                            C# on .NET 9 with xUnit and Roslyn analyzers
-go         Go                    stable   cli, library, service        Go with golangci-lint, table-driven tests and a cmd/internal layout
-java       Java                  stable   library, service, cli        Java 21 with Maven, JUnit 5, Spotless and SpotBugs
-nextjs     Next.js               planned  -                            Next.js App Router with TypeScript and Playwright
-nodejs     Node.js / TypeScript  stable   cli, library, service        TypeScript on Node.js with ESLint, Prettier and Vitest
-python     Python                stable   cli, library, service, data  Python 3.12 with uv, ruff, mypy and pytest
-react      React                 planned  -                            React single page app with Vite, TypeScript and Testing Library
-rust       Rust                  planned  -                            Rust with clippy, rustfmt and cargo-deny
-terraform  Terraform             planned  -                            Terraform modules with tflint, tfsec and Terratest
+ID         NAME                  STATUS   PROJECT TYPES              PACKAGE MANAGERS  SUMMARY
+dotnet     .NET                  planned  -                          -                 C# on .NET 9 with xUnit and Roslyn analyzers
+go         Go                    stable   api, cli, library, worker  gomod             Go with golangci-lint, table-driven tests and a cmd/internal layout
+java       Java                  stable   api, cli, library, worker  maven, gradle     Java 21 with Maven, JUnit 5, Spotless and SpotBugs
+nextjs     Next.js               planned  -                          -                 Next.js App Router with TypeScript and Playwright
+nodejs     Node.js / TypeScript  stable   api, cli, library, worker  npm, pnpm, yarn   TypeScript on Node.js with ESLint, Prettier and Vitest
+python     Python                stable   api, cli, library, worker  uv, pip, poetry   Python 3.12 with uv, ruff, mypy and pytest
+react      React                 planned  -                          -                 React single page app with Vite, TypeScript and Testing Library
+rust       Rust                  planned  -                          -                 Rust with clippy, rustfmt and cargo-deny
+terraform  Terraform             planned  -                          -                 Terraform modules with tflint, tfsec and Terratest
 ```
 
 **Create a repository interactively.**
 
 ```bash
-claude-repo-factory new
+claude-repo-factory create
 ```
+
+The command asks nine questions, then prints the configuration and asks you
+to confirm it:
+
+```
+? Project name: payment-api
+? Description: Payment service
+? Programming language: Node.js / TypeScript
+? Project type: API
+? Package manager: npm
+? Output directory: services/payment-api
+? Initialize Git? Yes
+? Include Claude Code setup? Yes
+? Include GitHub Actions? Yes
+
+Project Configuration
+---------------------
+Name: payment-api
+Description: Payment service
+Language: Node.js / TypeScript
+Type: API
+Package Manager: npm
+Output Directory: C:\Projects\services\payment-api
+Initialize Git: Yes
+Claude Code Setup: Yes
+GitHub Actions: Yes
+
+? Create this project? Yes
+Configuration accepted.
+```
+
+The package manager question is asked only when the language offers a choice:
+Go has one, so it is skipped; Node.js, Python and Java have several.
+
+> **This milestone stops there.** `create` resolves, validates and confirms a
+> configuration. It writes no files and initialises no Git repository.
 
 **Or fully from flags, with no prompts.**
 
 ```bash
-claude-repo-factory new widget \
+claude-repo-factory create widget \
   --language go \
-  --type service \
+  --type api \
   --description "Widget control plane" \
-  --author "Platform Team" \
-  --license Apache-2.0 \
+  --dir services/widget \
   --set go_module=github.com/acme/widget \
   --yes
 ```
 
 Every prompt has a flag equivalent, and `--yes` makes any invocation
-unattended, so the tool is fully scriptable.
+unattended, so the tool is fully scriptable. `create` is also available as
+`new`.
 
-### Flags for `new`
+Press Ctrl+C at any prompt to cancel; the command exits with status 130 and
+writes nothing.
+
+### Flags for `create`
 
 | Flag | Purpose |
 | --- | --- |
-| `-l, --language` | Language plugin, by id or alias (`ts`, `golang`, `py`, `jvm`) |
-| `-t, --type` | Project type within the language (`cli`, `library`, `service`, …) |
-| `-d, --dir` | Target directory (defaults to the repository name) |
+| `-l, --language` | Language plugin, by id or alias (`node`, `ts`, `py`, `golang`) |
+| `-t, --type` | Project type: `api`, `cli`, `library` or `worker` |
+| `--package-manager` | Package manager for the language, such as `npm`, `uv` or `maven` |
+| `-d, --dir` | The repository directory to create, such as `widget` or `services/widget` (defaults to the project name) |
 | `--description` | One line description |
 | `--author` | Author or owning team |
-| `--license` | SPDX identifier, or `none` |
+| `--license` | SPDX identifier, or `none` (default `MIT`) |
 | `--branch` | Initial branch name (default `main`) |
 | `--remote` | Git remote URL to register as `origin` |
 | `--set key=value` | Language-specific option, repeatable |
-| `-y, --yes` | Accept defaults for anything not given as a flag |
-| `--no-git`, `--no-ci`, `--no-docs`, `--no-claude-workflows` | Turn features off |
+| `-y, --yes` | Accept defaults for anything not given as a flag; never prompt |
+| `--plan` | Also print the full generation plan: artifacts and commands |
+| `--no-git` | Do not initialise a Git repository |
+| `--no-claude` | Do not generate Claude Code configuration |
+| `--no-ci` | Do not generate GitHub Actions workflows |
+| `--no-docs`, `--no-claude-workflows` | Turn the remaining features off |
+
+A `--no-*` flag always wins over its question: pass it and you are not asked.
+
+### Exit codes
+
+| Code | Meaning |
+| --- | --- |
+| `0` | Success, including declining the final confirmation |
+| `1` | Invalid configuration or another failure |
+| `130` | Cancelled at a prompt with Ctrl+C |
+
+### During development
+
+Run the CLI straight from the source tree:
+
+```bash
+go run ./cmd/claude-repo-factory create
+go run ./cmd/claude-repo-factory languages
+```
+
+The module has a single entry point, `cmd/claude-repo-factory`, so the
+command path is required; `go run .` from the repository root will not work.
 
 ## What a generated repository will contain
 

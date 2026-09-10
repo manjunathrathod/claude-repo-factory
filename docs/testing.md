@@ -43,7 +43,7 @@ duplicate id, an alias claimed by another plugin, an alias colliding with an
 id, and an unknown default project type. `List` is sorted; `Available`
 excludes planned languages; concurrent lookup is race-free.
 
-**`internal/spec`** — every validation rule, plus the rule that all problems
+**`internal/config`** — every validation rule, plus the rule that all problems
 are reported in one error rather than one per run. Option handling on a zero
 Spec. Sorted option keys.
 

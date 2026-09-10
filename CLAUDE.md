@@ -216,7 +216,7 @@ same workflow: move it out of `planned.go` into its own file and fill it in.
   and an explicit argument slice, as `gitutil.ExecRunner` does. No
   interpolation of user input into a command line, ever.
 - **Treat every path as hostile.** Repository names are validated against a
-  strict pattern in `spec.Validate`; generation must additionally reject any
+  strict pattern in `config.ValidateProjectName`; generation must additionally reject any
   resolved path that escapes the target directory.
 - **No secrets in the repository.** No tokens, keys, credentials, personal
   paths or email addresses in code, tests, fixtures, docs or commit messages.

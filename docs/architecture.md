@@ -72,19 +72,29 @@ concurrent use, matches case-insensitively on ids and aliases, and rejects
 duplicate ids, colliding aliases and an unknown default project type at
 registration — so a mis-wired plugin fails at start-up, not mid-generation.
 
-## Flow of a `new` command
+## Flow of a `create` command
 
-1. `cli` starts from `spec.Default()`, which enables every professional
+1. `cli` starts from `config.Default()`, which enables every professional
    feature. Flags and prompts only ever turn things off or fill things in.
-2. `cli` resolves the language through the registry, then asks the plugin what
-   language-specific options it needs (`lang.Options`) and collects them.
-   The CLI never knows what those answers mean.
-3. `spec.Validate` checks the language-agnostic invariants; `Language.Validate`
-   checks the language-specific ones.
-4. `cli` prints the plan.
-5. `Language.Files` returns the files to write. **Today it returns
+2. `cli` resolves the language through the registry, which maps an alias such
+   as `node` to the canonical id. Only the canonical id is stored.
+3. The project type and package manager are offered from the plugin
+   descriptor, so the set on offer is always the set the language actually
+   supports.
+4. `cli` asks the plugin what language-specific options it needs
+   (`lang.Options`) and collects them. The CLI never knows what those answers
+   mean.
+5. `ProjectConfig.Validate` checks the language-agnostic invariants against the
+   registry as its `config.Catalog`; `Language.Validate` checks the
+   language-specific ones.
+6. `cli` prints the summary and asks for confirmation. Validation comes first,
+   so a user is never asked to confirm a configuration that cannot work.
+7. `Language.Files` returns the files to write. **Today it returns
    `plugin.ErrNotImplemented` for every plugin** — generation is the next
-   milestone.
+   milestone, so confirming prints `Configuration accepted.` and writes
+   nothing.
+
+The command surface itself is documented in [cli.md](cli.md).
 
 ## Injectable boundaries
 

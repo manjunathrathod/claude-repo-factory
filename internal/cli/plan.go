@@ -3,31 +3,50 @@ package cli
 import (
 	"fmt"
 	"io"
-	"strings"
 	"text/tabwriter"
 
 	"github.com/manjunathrathod/claude-repo-factory/internal/config"
 	"github.com/manjunathrathod/claude-repo-factory/internal/plugin"
 )
 
-// universalArtifacts are the files every generated repository receives,
-// whatever the language. Language plugins contribute additional files on top
-// of these; the list lives here because it is a property of the factory, not
-// of any one language.
-var universalArtifacts = []string{
-	"README.md",
-	"CLAUDE.md",
-	".gitignore",
-	".claude/settings.json",
-	".claude/agents/",
-	".claude/commands/",
-	".github/workflows/ci.yml",
-	".github/PULL_REQUEST_TEMPLATE.md",
-	"docs/architecture.md",
-	"docs/coding-standards.md",
-	"docs/security.md",
-	"docs/testing.md",
-	"tests/",
+// universalArtifact is a file every generated repository receives, whatever
+// the language, together with the feature that decides whether it is written.
+// Language plugins contribute additional files on top of these; the list
+// lives here because it is a property of the factory, not of any one
+// language.
+type universalArtifact struct {
+	path string
+	// enabled reports whether this configuration produces the file. A nil
+	// enabled means the file is unconditional.
+	enabled func(config.ProjectConfig) bool
+}
+
+var universalArtifacts = []universalArtifact{
+	{path: "README.md"},
+	{path: "CLAUDE.md", enabled: func(c config.ProjectConfig) bool { return c.IncludeClaude }},
+	{path: ".gitignore"},
+	{path: ".claude/settings.json", enabled: func(c config.ProjectConfig) bool { return c.IncludeClaude }},
+	{path: ".claude/agents/", enabled: func(c config.ProjectConfig) bool { return c.IncludeClaudeAgents }},
+	{path: ".claude/commands/", enabled: func(c config.ProjectConfig) bool { return c.IncludeClaudeWorkflows }},
+	{path: ".github/workflows/ci.yml", enabled: func(c config.ProjectConfig) bool { return c.IncludeGitHubActions }},
+	{path: ".github/PULL_REQUEST_TEMPLATE.md", enabled: func(c config.ProjectConfig) bool { return c.IncludePRTemplate }},
+	{path: "docs/architecture.md", enabled: func(c config.ProjectConfig) bool { return c.IncludeDocs }},
+	{path: "docs/coding-standards.md", enabled: func(c config.ProjectConfig) bool { return c.IncludeCodingStandards }},
+	{path: "docs/security.md", enabled: func(c config.ProjectConfig) bool { return c.IncludeSecurityPolicy }},
+	{path: "docs/testing.md", enabled: func(c config.ProjectConfig) bool { return c.IncludeDocs }},
+	{path: "tests/", enabled: func(c config.ProjectConfig) bool { return c.IncludeTests }},
+}
+
+// artifactsFor returns the universal files this configuration would produce.
+// The plan must never promise a file the feature list above it says is off.
+func artifactsFor(c config.ProjectConfig) []string {
+	paths := make([]string, 0, len(universalArtifacts))
+	for _, a := range universalArtifacts {
+		if a.enabled == nil || a.enabled(c) {
+			paths = append(paths, a.path)
+		}
+	}
+	return paths
 }
 
 // writePlan prints the resolved specification and what generation would
@@ -44,15 +63,12 @@ func writePlan(w io.Writer, cfg config.ProjectConfig, language plugin.Language) 
 
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	row := func(k, v string) {
-		if strings.TrimSpace(v) == "" {
-			v = "-"
-		}
-		fmt.Fprintf(tw, "  %s\t%s\n", k, v)
+		fmt.Fprintf(tw, "  %s\t%s\n", k, displayValue(v))
 	}
 	row("Directory", path)
 	row("Description", cfg.Description)
 	row("Language", fmt.Sprintf("%s (%s)", desc.DisplayName, desc.ID))
-	row("Project type", string(cfg.ProjectType))
+	row("Project type", desc.ProjectTypeDisplayName(cfg.ProjectType))
 	row("Package manager", string(cfg.PackageManager))
 	row("Author", cfg.Author)
 	row("License", cfg.License)
@@ -71,7 +87,7 @@ func writePlan(w io.Writer, cfg config.ProjectConfig, language plugin.Language) 
 	}
 
 	fmt.Fprintf(w, "\nArtifacts\n")
-	for _, a := range universalArtifacts {
+	for _, a := range artifactsFor(cfg) {
 		fmt.Fprintf(w, "  %s\n", a)
 	}
 	fmt.Fprintf(w, "  (plus %s specific configuration)\n", desc.DisplayName)
