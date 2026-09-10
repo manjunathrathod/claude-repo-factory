@@ -28,7 +28,7 @@ root would be a second thing to keep in sync for no gain.
 ## What `create` does
 
 ```
-flags + prompts  ->  config.ProjectConfig  ->  Validate  ->  summary  ->  confirm
+flags + prompts -> config.ProjectConfig -> Validate -> summary -> confirm -> create
 ```
 
 1. `resolveConfig` starts from `config.Default()`, which enables every
@@ -43,8 +43,17 @@ flags + prompts  ->  config.ProjectConfig  ->  Validate  ->  summary  ->  confir
 5. Only after validation passes is the summary printed and the confirmation
    asked. A user is never asked to confirm a configuration that cannot work.
 
-Repository generation is not implemented. On confirmation the command prints
-`Configuration accepted.` and writes nothing.
+On confirmation the command hands the configuration to `generator.Prepare`,
+which validates it again and creates the repository directory through
+`internal/filesystem`. File generation is not implemented: the directory is
+created and left empty.
+
+`--dir` is the **parent**. `--dir C:\Projects` with the name `payment-api`
+creates `C:\Projects\payment-api`; `config.ResolvedOutputDirectory` returns the
+parent and `config.ResolvedProjectDirectory` returns the repository itself.
+The summary shows the parent, because that is what the user answered; the
+`--plan` block and the closing line show the repository directory, because
+that is where the work lands.
 
 ## The nine questions
 
@@ -133,3 +142,8 @@ What must stay covered: flag resolution, prompts being skipped when a flag was
 supplied, the summary shape and ordering, package-manager choices following
 the selected language, the defaults, cancellation, declining the
 confirmation, and the error message for each class of invalid input.
+
+Creation is faked by default. `run` injects a stub preparer so a test of the
+command layer cannot litter the working tree; `runWith` takes an explicit one,
+and the handful of tests that must see a real directory pass the production
+generator together with a `t.TempDir()` output directory.

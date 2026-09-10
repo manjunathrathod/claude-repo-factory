@@ -6,6 +6,7 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -13,11 +14,23 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/manjunathrathod/claude-repo-factory/internal/config"
+	"github.com/manjunathrathod/claude-repo-factory/internal/filesystem"
+	"github.com/manjunathrathod/claude-repo-factory/internal/generator"
 	"github.com/manjunathrathod/claude-repo-factory/internal/lang"
 	"github.com/manjunathrathod/claude-repo-factory/internal/plugin"
 	"github.com/manjunathrathod/claude-repo-factory/internal/prompt"
 	"github.com/manjunathrathod/claude-repo-factory/internal/version"
 )
+
+// Preparer creates the repository workspace for a validated configuration.
+//
+// It is declared here, where the command layer consumes it, so a test can
+// substitute a double and assert on what the command asked for without
+// touching a real filesystem. *generator.Generator satisfies it.
+type Preparer interface {
+	Prepare(ctx context.Context, cfg config.ProjectConfig, catalog config.Catalog) (generator.Result, error)
+}
 
 // App carries the dependencies shared by every command.
 type App struct {
@@ -25,16 +38,23 @@ type App struct {
 	Asker    prompt.Asker
 	Out      io.Writer
 	Err      io.Writer
+	// Generator creates the repository directory. There is deliberately no
+	// fallback for a nil Generator: this is the one dependency whose failure
+	// mode is writing to a real disk, so forgetting to wire it must fail
+	// loudly in a test rather than quietly reach the filesystem. NewApp
+	// always sets it, and cli_test always injects a double.
+	Generator Preparer
 }
 
-// NewApp returns an App wired to the built-in language registry and the
-// interactive prompt implementation.
+// NewApp returns an App wired to the built-in language registry, the
+// interactive prompt implementation and the real filesystem.
 func NewApp() *App {
 	return &App{
-		Registry: lang.Registry(),
-		Asker:    prompt.Survey{},
-		Out:      os.Stdout,
-		Err:      os.Stderr,
+		Registry:  lang.Registry(),
+		Asker:     prompt.Survey{},
+		Out:       os.Stdout,
+		Err:       os.Stderr,
+		Generator: generator.New(filesystem.Workspace{}),
 	}
 }
 

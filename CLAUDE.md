@@ -32,6 +32,8 @@ internal/cli/              Cobra commands, flag parsing, plan rendering.
 internal/config/           ProjectConfig: the typed, validated repo description.
 internal/plugin/           The Language contract and the registry. No language knowledge.
 internal/lang/             One file per language plugin, plus the shared Definition.
+internal/generator/        Validates a config, then creates the workspace.
+internal/filesystem/       Safe directory creation. Imports nothing internal.
 internal/render/           text/template wrapper and naming helpers.
 internal/gitutil/          Testable wrapper around the git command line.
 internal/prompt/           Asker interface; survey implementation and a scripted one.
