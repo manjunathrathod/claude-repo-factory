@@ -151,3 +151,15 @@ func (d Descriptor) HasPackageManager(m config.PackageManager) bool {
 	}
 	return false
 }
+
+// ProjectTypeDisplayName returns the plugin's human-facing name for a project
+// type, such as "API" for "api". It falls back to the identifier so a caller
+// always has something to print, even for a type the plugin does not declare.
+func (d Descriptor) ProjectTypeDisplayName(id config.ProjectType) string {
+	for _, pt := range d.ProjectTypes {
+		if pt.ID == id {
+			return pt.DisplayName
+		}
+	}
+	return string(id)
+}

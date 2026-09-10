@@ -1,137 +1,557 @@
 package cli_test
 
 import (
+	"errors"
+	"os"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/manjunathrathod/claude-repo-factory/internal/prompt"
 )
 
-func TestNewWithFlagsPrintsThePlan(t *testing.T) {
-	out, _, err := run(t, nil,
-		"new", "widget",
-		"--language", "go",
-		"--type", "api",
-		"--description", "Widget control plane",
-		"--author", "Platform Team",
-		"--license", "Apache-2.0",
-		"--set", "go_module=github.com/acme/widget",
-		"--yes",
-	)
-	if err != nil {
-		t.Fatalf("new error = %v\n%s", err, out)
-	}
+// The prompt messages the create command uses. They are duplicated here on
+// purpose: a test that imported the constants would still pass if the wording
+// changed, and the wording is part of the user-facing contract.
+const (
+	askName        = "Project name"
+	askDescription = "Description"
+	askLanguage    = "Programming language"
+	askProjectType = "Project type"
+	askPackageMgr  = "Package manager"
+	askOutputDir   = "Output directory"
+	askGit         = "Initialize Git?"
+	askClaude      = "Include Claude Code setup?"
+	askActions     = "Include GitHub Actions?"
+	askConfirm     = "Create this project?"
+	askGoModule    = "Go module path"
+)
 
-	for _, want := range []string{
-		"widget",
-		"Widget control plane",
-		"Go (go)",
-		"api",
-		"Platform Team",
-		"Apache-2.0",
-		"github.com/acme/widget",
-		"CLAUDE.md",
-		".claude/agents/",
-		".github/workflows/ci.yml",
-		"go test ./...",
-		"not implemented yet",
-	} {
+// fullyScripted returns an asker with an answer for every question the create
+// command asks for a Go project, so a test can override just the one it cares
+// about.
+func fullyScripted() *prompt.Scripted {
+	asker := prompt.NewScripted(map[string]string{
+		askName:        "widget",
+		askDescription: "Widget control plane",
+		askLanguage:    "go",
+		askProjectType: "cli",
+		askOutputDir:   "widget",
+		askGoModule:    "github.com/acme/widget",
+	})
+	asker.Confirms = map[string]bool{
+		askGit:     true,
+		askClaude:  true,
+		askActions: true,
+		askConfirm: true,
+	}
+	return asker
+}
+
+func TestCreateCommandIsRegisteredUnderBothNames(t *testing.T) {
+	// "create" is the documented name and "new" the compatibility alias.
+	// Both must reach the same command.
+	for _, name := range []string{"create", "new"} {
+		t.Run(name, func(t *testing.T) {
+			out, _, err := run(t, nil, name, "widget", "-l", "go", "--yes")
+			if err != nil {
+				t.Fatalf("%s error = %v\n%s", name, err, out)
+			}
+			if !strings.Contains(out, "Configuration accepted.") {
+				t.Errorf("%s did not accept the configuration\n%s", name, out)
+			}
+		})
+	}
+}
+
+func TestCreateHelpDescribesTheCommand(t *testing.T) {
+	out, _, err := run(t, nil, "create", "--help")
+	if err != nil {
+		t.Fatalf("create --help error = %v", err)
+	}
+	for _, want := range []string{"--language", "--type", "--package-manager", "--dir", "--yes", "--no-git", "--no-claude", "--no-ci"} {
 		if !strings.Contains(out, want) {
-			t.Errorf("plan is missing %q\n%s", want, out)
+			t.Errorf("help is missing %q\n%s", want, out)
 		}
 	}
 }
 
-func TestNewResolvesPackageManager(t *testing.T) {
-	out, _, err := run(t, nil, "new", "widget", "-l", "python", "--package-manager", "poetry", "--yes")
+func TestCreatePrintsTheSummaryInTheDocumentedFormat(t *testing.T) {
+	out, _, err := run(t, nil,
+		"create", "payment-api",
+		"--language", "node",
+		"--type", "api",
+		"--package-manager", "npm",
+		"--description", "Payment service",
+		"--dir", "services",
+		"--yes",
+	)
 	if err != nil {
-		t.Fatalf("new error = %v\n%s", err, out)
+		t.Fatalf("create error = %v\n%s", err, out)
 	}
-	if !strings.Contains(out, "poetry") {
-		t.Errorf("plan is missing the chosen package manager\n%s", out)
+
+	for _, want := range []string{
+		"Project Configuration",
+		"---------------------",
+		"Name: payment-api",
+		"Description: Payment service",
+		"Language: Node.js / TypeScript",
+		"Type: API",
+		"Package Manager: npm",
+		"Output Directory: ",
+		"Initialize Git: Yes",
+		"Claude Code Setup: Yes",
+		"GitHub Actions: Yes",
+		"Configuration accepted.",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("summary is missing %q\n%s", want, out)
+		}
 	}
 }
 
-func TestNewDefaultsThePackageManager(t *testing.T) {
-	out, _, err := run(t, nil, "new", "widget", "-l", "python", "--yes")
+func TestCreateSummaryOrderIsStable(t *testing.T) {
+	out, _, err := run(t, nil, "create", "widget", "-l", "go", "--description", "Widget", "--yes")
 	if err != nil {
-		t.Fatalf("new error = %v\n%s", err, out)
+		t.Fatalf("create error = %v\n%s", err, out)
 	}
-	// uv is the declared default for python; a single-manager language such
-	// as go must resolve without asking at all.
-	if !strings.Contains(out, "Package manager  uv") {
-		t.Errorf("plan did not use the declared default package manager\n%s", out)
+
+	labels := []string{
+		"Name:", "Description:", "Language:", "Type:", "Package Manager:",
+		"Output Directory:", "Initialize Git:", "Claude Code Setup:", "GitHub Actions:",
+	}
+	last := -1
+	for _, label := range labels {
+		at := strings.Index(out, label)
+		if at < 0 {
+			t.Fatalf("summary is missing %q\n%s", label, out)
+		}
+		if at < last {
+			t.Errorf("%q appears out of order\n%s", label, out)
+		}
+		last = at
 	}
 }
 
-func TestNewDoesNotPromptWhenALanguageHasOnePackageManager(t *testing.T) {
-	asker := prompt.NewScripted(map[string]string{
-		"Project type":   "cli",
-		"Go module path": "github.com/acme/widget",
-		"Author":         "Platform Team",
-		"License":        "MIT",
-	})
-	asker.Answers["One line description"] = "Widget"
+func TestCreateAsksTheDocumentedQuestionsInOrder(t *testing.T) {
+	asker := fullyScripted()
 
-	_, _, err := run(t, asker, "new", "widget", "-l", "go")
+	out, _, err := run(t, asker, "create")
 	if err != nil {
-		t.Fatalf("new error = %v", err)
+		t.Fatalf("create error = %v\n%s", err, out)
 	}
-	if containsString(asker.Asked, "Package manager") {
+
+	// Go declares a single package manager, so that question is correctly
+	// skipped; the rest are asked in the documented order.
+	want := []string{askName, askDescription, askLanguage, askProjectType, askOutputDir, askGit, askClaude, askActions}
+	var got []string
+	for _, asked := range asker.Asked {
+		for _, w := range want {
+			if asked == w {
+				got = append(got, asked)
+			}
+		}
+	}
+
+	if len(got) != len(want) {
+		t.Fatalf("asked %v, want all of %v", asker.Asked, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("question %d = %q, want %q (full order: %v)", i, got[i], want[i], asker.Asked)
+		}
+	}
+}
+
+func TestCreateAsksToConfirmLast(t *testing.T) {
+	asker := fullyScripted()
+
+	if _, _, err := run(t, asker, "create"); err != nil {
+		t.Fatalf("create error = %v", err)
+	}
+	if len(asker.Asked) == 0 {
+		t.Fatal("no questions were asked")
+	}
+	if last := asker.Asked[len(asker.Asked)-1]; last != askConfirm {
+		t.Errorf("last question = %q, want %q", last, askConfirm)
+	}
+}
+
+func TestCreateDeclinedLeavesNothingBehind(t *testing.T) {
+	asker := fullyScripted()
+	asker.Confirms[askConfirm] = false
+
+	out, _, err := run(t, asker, "create")
+	if err != nil {
+		t.Fatalf("declining is not an error, got %v", err)
+	}
+	if strings.Contains(out, "Configuration accepted.") {
+		t.Errorf("a declined configuration was accepted anyway\n%s", out)
+	}
+	if !strings.Contains(out, "Cancelled") {
+		t.Errorf("declining did not report a cancellation\n%s", out)
+	}
+}
+
+func TestCreateFailsWhenAPromptCannotBeAnswered(t *testing.T) {
+	_, _, err := run(t, prompt.NewScripted(nil), "create")
+	if err == nil {
+		t.Fatal("create = nil error, want the unanswerable prompt to surface")
+	}
+}
+
+// interruptingAsker aborts at the named prompt, standing in for Ctrl+C.
+type interruptingAsker struct {
+	*prompt.Scripted
+	at string
+}
+
+func (a *interruptingAsker) Input(message, help, def string) (string, error) {
+	if message == a.at {
+		return "", prompt.ErrInterrupted
+	}
+	return a.Scripted.Input(message, help, def)
+}
+
+func (a *interruptingAsker) Confirm(message, help string, def bool) (bool, error) {
+	if message == a.at {
+		return false, prompt.ErrInterrupted
+	}
+	return a.Scripted.Confirm(message, help, def)
+}
+
+// Ctrl+C must stay matchable as prompt.ErrInterrupted all the way out of the
+// command, because that is what root.Execute maps to exit code 130.
+func TestCreateCancellationStaysMatchable(t *testing.T) {
+	for _, at := range []string{askName, askOutputDir, askConfirm} {
+		t.Run(at, func(t *testing.T) {
+			asker := &interruptingAsker{Scripted: fullyScripted(), at: at}
+
+			out, _, err := run(t, asker, "create")
+			if !errors.Is(err, prompt.ErrInterrupted) {
+				t.Fatalf("error = %v, want it to wrap prompt.ErrInterrupted", err)
+			}
+			if strings.Contains(out, "Configuration accepted.") {
+				t.Errorf("a cancelled run accepted the configuration
+%s", out)
+			}
+		})
+	}
+}
+
+func TestCreateLanguageSelection(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{name: "canonical id", input: "go", want: "Language: Go"},
+		{name: "node alias", input: "node", want: "Language: Node.js / TypeScript"},
+		{name: "typescript alias", input: "typescript", want: "Language: Node.js / TypeScript"},
+		{name: "python", input: "python", want: "Language: Python"},
+		{name: "java", input: "java", want: "Language: Java"},
+		{name: "uppercase is normalised", input: "GO", want: "Language: Go"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			out, _, err := run(t, nil, "create", "widget", "-l", tt.input, "--yes")
+			if err != nil {
+				t.Fatalf("create error = %v\n%s", err, out)
+			}
+			if !strings.Contains(out, tt.want) {
+				t.Errorf("summary is missing %q\n%s", tt.want, out)
+			}
+		})
+	}
+}
+
+func TestCreateProjectTypeSelection(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{name: "api", args: []string{"-l", "go", "-t", "api"}, want: "Type: API"},
+		{name: "cli", args: []string{"-l", "go", "-t", "cli"}, want: "Type: CLI"},
+		{name: "library", args: []string{"-l", "go", "-t", "library"}, want: "Type: Library"},
+		{name: "worker", args: []string{"-l", "go", "-t", "worker"}, want: "Type: Worker"},
+		{name: "uppercase is normalised", args: []string{"-l", "go", "-t", "API"}, want: "Type: API"},
+		{name: "go defaults to cli", args: []string{"-l", "go"}, want: "Type: CLI"},
+		{name: "python defaults to library", args: []string{"-l", "python"}, want: "Type: Library"},
+		{name: "java defaults to api", args: []string{"-l", "java"}, want: "Type: API"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			args := append([]string{"create", "widget"}, tt.args...)
+			out, _, err := run(t, nil, append(args, "--yes")...)
+			if err != nil {
+				t.Fatalf("create error = %v\n%s", err, out)
+			}
+			if !strings.Contains(out, tt.want) {
+				t.Errorf("summary is missing %q\n%s", tt.want, out)
+			}
+		})
+	}
+}
+
+func TestCreatePackageManagerSelection(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{name: "explicit poetry", args: []string{"-l", "python", "--package-manager", "poetry"}, want: "Package Manager: poetry"},
+		{name: "explicit pnpm", args: []string{"-l", "nodejs", "--package-manager", "pnpm"}, want: "Package Manager: pnpm"},
+		{name: "explicit gradle", args: []string{"-l", "java", "--package-manager", "gradle"}, want: "Package Manager: gradle"},
+		{name: "python defaults to uv", args: []string{"-l", "python"}, want: "Package Manager: uv"},
+		{name: "node defaults to npm", args: []string{"-l", "nodejs"}, want: "Package Manager: npm"},
+		{name: "java defaults to maven", args: []string{"-l", "java"}, want: "Package Manager: maven"},
+		{name: "go has only one", args: []string{"-l", "go"}, want: "Package Manager: gomod"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			args := append([]string{"create", "widget"}, tt.args...)
+			out, _, err := run(t, nil, append(args, "--yes")...)
+			if err != nil {
+				t.Fatalf("create error = %v\n%s", err, out)
+			}
+			if !strings.Contains(out, tt.want) {
+				t.Errorf("summary is missing %q\n%s", tt.want, out)
+			}
+		})
+	}
+}
+
+func TestCreatePackageManagerChoicesFollowTheLanguage(t *testing.T) {
+	// The offered set is ecosystem knowledge and must come from the plugin,
+	// so a manager from another ecosystem is rejected rather than accepted.
+	tests := []struct {
+		name     string
+		language string
+		manager  string
+	}{
+		{name: "npm is not a python manager", language: "python", manager: "npm"},
+		{name: "uv is not a node manager", language: "nodejs", manager: "uv"},
+		{name: "maven is not a go manager", language: "go", manager: "maven"},
+		{name: "poetry is not a java manager", language: "java", manager: "poetry"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, _, err := run(t, nil, "create", "widget", "-l", tt.language, "--package-manager", tt.manager, "--yes")
+			if err == nil {
+				t.Fatalf("create accepted %q for %s", tt.manager, tt.language)
+			}
+			if !strings.Contains(err.Error(), "does not support package manager") {
+				t.Errorf("error = %v, want it to name the unsupported manager", err)
+			}
+		})
+	}
+}
+
+func TestCreateDoesNotAskAboutASinglePackageManager(t *testing.T) {
+	asker := fullyScripted()
+
+	if _, _, err := run(t, asker, "create", "widget", "-l", "go"); err != nil {
+		t.Fatalf("create error = %v", err)
+	}
+	if slices.Contains(asker.Asked, askPackageMgr) {
 		t.Error("the user was asked to choose between one package manager")
 	}
 }
 
-func TestNewResolvesAnAlias(t *testing.T) {
-	out, _, err := run(t, nil, "new", "widget", "-l", "typescript", "--yes")
+func TestCreateAsksAboutSeveralPackageManagers(t *testing.T) {
+	asker := fullyScripted()
+	asker.Answers[askLanguage] = "python"
+	asker.Answers[askPackageMgr] = "pip"
+	asker.Answers["Python package name"] = "widget"
+
+	out, _, err := run(t, asker, "create", "widget")
 	if err != nil {
-		t.Fatalf("new error = %v\n%s", err, out)
+		t.Fatalf("create error = %v\n%s", err, out)
 	}
-	if !strings.Contains(out, "Node.js / TypeScript (nodejs)") {
-		t.Errorf("plan did not resolve the alias\n%s", out)
+	if !slices.Contains(asker.Asked, askPackageMgr) {
+		t.Errorf("the user was never asked to choose a package manager (asked: %v)", asker.Asked)
+	}
+	if !strings.Contains(out, "Package Manager: pip") {
+		t.Errorf("summary did not use the chosen package manager\n%s", out)
 	}
 }
 
-func TestNewUsesTheLanguageDefaultProjectType(t *testing.T) {
-	out, _, err := run(t, nil, "new", "widget", "-l", "python", "--yes")
+func TestCreateDefaults(t *testing.T) {
+	out, _, err := run(t, nil, "create", "widget", "-l", "go", "--yes")
 	if err != nil {
-		t.Fatalf("new error = %v\n%s", err, out)
-	}
-	if !strings.Contains(out, "Project type     library") {
-		t.Errorf("plan did not use the default project type\n%s", out)
-	}
-}
-
-func TestNewAppliesLanguageOptionDefaults(t *testing.T) {
-	out, _, err := run(t, nil, "new", "my-widget", "-l", "python", "--yes")
-	if err != nil {
-		t.Fatalf("new error = %v\n%s", err, out)
-	}
-	if !strings.Contains(out, "my_widget") {
-		t.Errorf("plan is missing the derived package name\n%s", out)
-	}
-}
-
-func TestNewSkipFlagsTurnFeaturesOff(t *testing.T) {
-	out, _, err := run(t, nil, "new", "widget", "-l", "go", "--yes", "--no-ci", "--no-git", "--no-docs", "--no-claude-workflows")
-	if err != nil {
-		t.Fatalf("new error = %v\n%s", err, out)
+		t.Fatalf("create error = %v\n%s", err, out)
 	}
 
-	for _, want := range []string{
-		"[ ] Git initialisation",
-		"[ ] GitHub Actions CI",
-		"[ ] Documentation structure",
-		"[ ] Claude feature/review/fix workflows",
-		"[x] Claude specialist agents",
-	} {
+	// Every professional feature is on unless it was turned off.
+	for _, want := range []string{"Initialize Git: Yes", "Claude Code Setup: Yes", "GitHub Actions: Yes"} {
 		if !strings.Contains(out, want) {
-			t.Errorf("feature list is missing %q\n%s", want, out)
+			t.Errorf("default is not enabled: %q\n%s", want, out)
 		}
 	}
 }
 
-func TestNewRejectsInvalidInput(t *testing.T) {
+func TestCreateOutputDirectoryDefaultsToTheProjectName(t *testing.T) {
+	out, _, err := run(t, nil, "create", "widget", "-l", "go", "--yes")
+	if err != nil {
+		t.Fatalf("create error = %v\n%s", err, out)
+	}
+	// Resolved to an absolute path so the user confirms what would be
+	// written, and ending in the project name.
+	line := summaryValue(t, out, "Output Directory")
+	if !strings.HasSuffix(line, "widget") {
+		t.Errorf("output directory = %q, want it to end in the project name", line)
+	}
+}
+
+func TestCreateOutputDirectoryAcceptsPlatformPaths(t *testing.T) {
+	// Relative, POSIX-absolute and Windows-shaped paths must all be accepted;
+	// resolution to the host form is the model's job, not the CLI's.
+	for _, dir := range []string{"services", "services/team", `services\team`, "./services"} {
+		t.Run(dir, func(t *testing.T) {
+			out, _, err := run(t, nil, "create", "widget", "-l", "go", "--dir", dir, "--yes")
+			if err != nil {
+				t.Fatalf("create error = %v\n%s", err, out)
+			}
+			if !strings.Contains(out, "Output Directory:") {
+				t.Errorf("summary is missing the output directory\n%s", out)
+			}
+		})
+	}
+}
+
+func TestCreateFeatureFlagsOverrideTheDefaults(t *testing.T) {
+	tests := []struct {
+		name string
+		flag string
+		want string
+	}{
+		{name: "no git", flag: "--no-git", want: "Initialize Git: No"},
+		{name: "no claude", flag: "--no-claude", want: "Claude Code Setup: No"},
+		{name: "no ci", flag: "--no-ci", want: "GitHub Actions: No"},
+		// An explicit =false must keep the feature on. Without newOptions.explicit
+		// these three cases are indistinguishable from the flag being absent.
+		{name: "explicit no-git=false keeps git on", flag: "--no-git=false", want: "Initialize Git: Yes"},
+		{name: "explicit no-claude=false keeps claude on", flag: "--no-claude=false", want: "Claude Code Setup: Yes"},
+		{name: "explicit no-ci=false keeps actions on", flag: "--no-ci=false", want: "GitHub Actions: Yes"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			out, _, err := run(t, nil, "create", "widget", "-l", "go", "--yes", tt.flag)
+			if err != nil {
+				t.Fatalf("create error = %v\n%s", err, out)
+			}
+			if !strings.Contains(out, tt.want) {
+				t.Errorf("summary is missing %q\n%s", tt.want, out)
+			}
+		})
+	}
+}
+
+func TestCreateDoesNotAskAboutAFeatureGivenAsAFlag(t *testing.T) {
+	tests := []struct {
+		name   string
+		flag   string
+		prompt string
+	}{
+		{name: "git", flag: "--no-git", prompt: askGit},
+		{name: "claude", flag: "--no-claude", prompt: askClaude},
+		{name: "actions", flag: "--no-ci", prompt: askActions},
+		{name: "git given as false", flag: "--no-git=false", prompt: askGit},
+		{name: "claude given as false", flag: "--no-claude=false", prompt: askClaude},
+		{name: "actions given as false", flag: "--no-ci=false", prompt: askActions},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			asker := fullyScripted()
+			if _, _, err := run(t, asker, "create", "widget", "-l", "go", tt.flag); err != nil {
+				t.Fatalf("create error = %v", err)
+			}
+			if slices.Contains(asker.Asked, tt.prompt) {
+				t.Errorf("the user was asked %q even though %s was passed", tt.prompt, tt.flag)
+			}
+		})
+	}
+}
+
+func TestCreateDoesNotPromptForAnswersGivenAsFlags(t *testing.T) {
+	asker := fullyScripted()
+
+	_, _, err := run(t, asker,
+		"create", "widget",
+		"-l", "go",
+		"-t", "cli",
+		"--description", "Widget control plane",
+		"--dir", "services",
+		"--set", "go_module=github.com/acme/widget",
+	)
+	if err != nil {
+		t.Fatalf("create error = %v", err)
+	}
+
+	for _, unwanted := range []string{askName, askLanguage, askProjectType, askDescription, askOutputDir, askGoModule} {
+		if slices.Contains(asker.Asked, unwanted) {
+			t.Errorf("the user was asked %q even though it was passed as a flag", unwanted)
+		}
+	}
+}
+
+func TestCreateWithYesNeverPrompts(t *testing.T) {
+	// A scripted asker with no answers errors on any question, so reaching
+	// the end proves --yes asked nothing.
+	asker := prompt.NewScripted(nil)
+
+	out, _, err := run(t, asker, "create", "widget", "-l", "go", "--yes")
+	if err != nil {
+		t.Fatalf("create --yes error = %v\n%s", err, out)
+	}
+	if len(asker.Asked) != 0 {
+		t.Errorf("--yes asked %v, want nothing", asker.Asked)
+	}
+	if !strings.Contains(out, "Configuration accepted.") {
+		t.Errorf("--yes did not accept the configuration\n%s", out)
+	}
+}
+
+func TestCreateMapsAnswersOntoTheConfiguration(t *testing.T) {
+	asker := fullyScripted()
+	asker.Answers[askName] = "payment-api"
+	asker.Answers[askDescription] = "Payment service"
+	asker.Answers[askLanguage] = "nodejs"
+	asker.Answers[askProjectType] = "api"
+	asker.Answers[askPackageMgr] = "pnpm"
+	asker.Answers[askOutputDir] = "services"
+	asker.Answers["npm package name"] = "payment-api"
+	asker.Confirms[askActions] = false
+
+	out, _, err := run(t, asker, "create")
+	if err != nil {
+		t.Fatalf("create error = %v\n%s", err, out)
+	}
+
+	for _, want := range []string{
+		"Name: payment-api",
+		"Description: Payment service",
+		"Language: Node.js / TypeScript",
+		"Type: API",
+		"Package Manager: pnpm",
+		"Initialize Git: Yes",
+		"Claude Code Setup: Yes",
+		"GitHub Actions: No",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("summary is missing %q\n%s", want, out)
+		}
+	}
+}
+
+func TestCreateRejectsInvalidInput(t *testing.T) {
 	tests := []struct {
 		name    string
 		args    []string
@@ -139,118 +559,188 @@ func TestNewRejectsInvalidInput(t *testing.T) {
 	}{
 		{
 			name:    "unknown language",
-			args:    []string{"new", "widget", "-l", "cobol", "--yes"},
+			args:    []string{"create", "widget", "-l", "cobol", "--yes"},
 			wantErr: "unknown language",
 		},
 		{
 			name:    "planned language",
-			args:    []string{"new", "widget", "-l", "rust", "--yes"},
+			args:    []string{"create", "widget", "-l", "rust", "--yes"},
 			wantErr: "not available yet",
 		},
 		{
 			name:    "unknown project type",
-			args:    []string{"new", "widget", "-l", "go", "-t", "mainframe", "--yes"},
+			args:    []string{"create", "widget", "-l", "go", "-t", "mainframe", "--yes"},
 			wantErr: "must be one of api, cli, library, worker",
 		},
 		{
-			name:    "invalid repository name",
-			args:    []string{"new", "acme/widget", "-l", "go", "--yes"},
+			name:    "project name with a separator",
+			args:    []string{"create", "acme/widget", "-l", "go", "--yes"},
 			wantErr: "ProjectName:",
 		},
 		{
-			name:    "project type the language does not offer",
-			args:    []string{"new", "widget", "-l", "go", "-t", "api", "--package-manager", "npm", "--yes"},
+			name:    "project name that traverses",
+			args:    []string{"create", "../widget", "-l", "go", "--yes"},
+			wantErr: "ProjectName:",
+		},
+		{
+			name:    "reserved device name",
+			args:    []string{"create", "nul", "-l", "go", "--yes"},
+			wantErr: "ProjectName:",
+		},
+		{
+			name:    "output directory that traverses",
+			args:    []string{"create", "widget", "-l", "go", "--dir", "../../etc", "--yes"},
+			wantErr: "OutputDirectory:",
+		},
+		{
+			name:    "package manager from another ecosystem",
+			args:    []string{"create", "widget", "-l", "go", "--package-manager", "npm", "--yes"},
 			wantErr: "does not support package manager",
 		},
 		{
 			name:    "malformed set option",
-			args:    []string{"new", "widget", "-l", "go", "--set", "novalue", "--yes"},
+			args:    []string{"create", "widget", "-l", "go", "--set", "novalue", "--yes"},
 			wantErr: "expected key=value",
 		},
 		{
 			name:    "too many positional arguments",
-			args:    []string{"new", "widget", "extra", "--yes"},
+			args:    []string{"create", "widget", "extra", "--yes"},
 			wantErr: "accepts at most 1 arg",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, _, err := run(t, nil, tt.args...)
+			out, _, err := run(t, nil, tt.args...)
 			if err == nil {
-				t.Fatalf("new = nil error, want one containing %q", tt.wantErr)
+				t.Fatalf("create = nil error, want one containing %q\n%s", tt.wantErr, out)
 			}
 			if !strings.Contains(err.Error(), tt.wantErr) {
-				t.Fatalf("new error = %v, want one containing %q", err, tt.wantErr)
+				t.Fatalf("create error = %v, want one containing %q", err, tt.wantErr)
+			}
+			if strings.Contains(out, "Configuration accepted.") {
+				t.Error("an invalid configuration was accepted")
+			}
+			// Ordering matters: validation runs before anything is displayed,
+			// so a rejected configuration never reaches the summary.
+			if strings.Contains(out, summaryTitleText) {
+				t.Errorf("a rejected configuration was printed as a summary
+%s", out)
 			}
 		})
 	}
 }
 
-func TestNewPromptsForEverythingItWasNotGiven(t *testing.T) {
-	asker := prompt.NewScripted(map[string]string{
-		"Repository name":      "widget",
-		"One line description": "Widget control plane",
-		"Primary language":     "go",
-		"Project type":         "cli",
-		"Author":               "Platform Team",
-		"License":              "MIT",
-		"Go module path":       "github.com/acme/widget",
-	})
+func TestCreateRejectsAnUnsafeAnswerFromAPrompt(t *testing.T) {
+	// The traversal table below drives --dir. This pins the other front door:
+	// the same value typed at the prompt must be rejected identically.
+	for _, answer := range []string{"../../etc", `..\..\Windows`, "NUL"} {
+		t.Run(answer, func(t *testing.T) {
+			asker := fullyScripted()
+			asker.Answers[askOutputDir] = answer
 
-	out, _, err := run(t, asker, "new")
-	if err != nil {
-		t.Fatalf("new error = %v\n%s", err, out)
-	}
-
-	for _, want := range []string{"widget", "Widget control plane", "Go (go)", "cli", "github.com/acme/widget"} {
-		if !strings.Contains(out, want) {
-			t.Errorf("plan is missing %q\n%s", want, out)
-		}
-	}
-
-	for _, wantPrompt := range []string{"Repository name", "Primary language", "Project type", "Go module path"} {
-		if !containsString(asker.Asked, wantPrompt) {
-			t.Errorf("the user was never asked %q (asked: %v)", wantPrompt, asker.Asked)
-		}
+			out, _, err := run(t, asker, "create")
+			if err == nil {
+				t.Fatalf("create accepted %q from the prompt
+%s", answer, out)
+			}
+			if strings.Contains(out, summaryTitleText) {
+				t.Errorf("an unsafe configuration reached the summary
+%s", out)
+			}
+		})
 	}
 }
 
-func TestNewDoesNotPromptForAnswersGivenAsFlags(t *testing.T) {
-	asker := prompt.NewScripted(map[string]string{"Project type": "cli"})
+func TestCreateValidatesBeforeAskingToConfirm(t *testing.T) {
+	asker := fullyScripted()
 
-	_, _, err := run(t, asker,
-		"new", "widget",
+	_, _, err := run(t, asker, "create", "acme/widget", "-l", "go")
+	if err == nil {
+		t.Fatal("create = nil error, want the invalid name to be rejected")
+	}
+	if slices.Contains(asker.Asked, askConfirm) {
+		t.Error("the user was asked to confirm an invalid configuration")
+	}
+}
+
+func TestCreatePlanFlagPrintsTheFullPlan(t *testing.T) {
+	out, _, err := run(t, nil,
+		"create", "widget",
 		"-l", "go",
 		"--description", "Widget control plane",
-		"--author", "Platform Team",
-		"--license", "MIT",
 		"--set", "go_module=github.com/acme/widget",
+		"--plan", "--yes",
 	)
 	if err != nil {
-		t.Fatalf("new error = %v", err)
+		t.Fatalf("create --plan error = %v\n%s", err, out)
 	}
 
-	for _, unwanted := range []string{"Repository name", "Primary language", "Author", "License", "Go module path"} {
-		if containsString(asker.Asked, unwanted) {
-			t.Errorf("the user was asked %q even though it was passed as a flag", unwanted)
+	for _, want := range []string{
+		"Repository plan",
+		"CLAUDE.md",
+		".claude/agents/",
+		".github/workflows/ci.yml",
+		"go test ./...",
+		"github.com/acme/widget",
+		"Project Configuration",
+		"Configuration accepted.",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("plan output is missing %q\n%s", want, out)
 		}
 	}
 }
 
-func TestNewPropagatesAPromptFailure(t *testing.T) {
-	// An asker with no scripted answers stands in for a cancelled prompt.
-	_, _, err := run(t, prompt.NewScripted(nil), "new")
-	if err == nil {
-		t.Fatal("new = nil error, want the prompt failure to surface")
+func TestCreateWithoutPlanFlagOmitsTheArtifactList(t *testing.T) {
+	out, _, err := run(t, nil, "create", "widget", "-l", "go", "--yes")
+	if err != nil {
+		t.Fatalf("create error = %v\n%s", err, out)
+	}
+	if strings.Contains(out, "Repository plan") {
+		t.Errorf("the full plan was printed without --plan\n%s", out)
 	}
 }
 
-func containsString(haystack []string, needle string) bool {
-	for _, s := range haystack {
-		if s == needle {
-			return true
+func TestCreateAppliesLanguageOptionDefaults(t *testing.T) {
+	out, _, err := run(t, nil, "create", "my-widget", "-l", "python", "--plan", "--yes")
+	if err != nil {
+		t.Fatalf("create error = %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "my_widget") {
+		t.Errorf("plan is missing the derived package name\n%s", out)
+	}
+}
+
+func TestCreateWritesNothingToDisk(t *testing.T) {
+	dir := t.TempDir()
+
+	out, _, err := run(t, nil, "create", "widget", "-l", "go", "--dir", dir, "--yes")
+	if err != nil {
+		t.Fatalf("create error = %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "Configuration accepted.") {
+		t.Fatalf("create did not accept the configuration\n%s", out)
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("read target directory: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Errorf("create wrote %d entries into the target directory, want none", len(entries))
+	}
+}
+
+// summaryValue returns the value printed for a summary label.
+func summaryValue(t *testing.T, out, label string) string {
+	t.Helper()
+	for _, line := range strings.Split(out, "\n") {
+		if after, ok := strings.CutPrefix(strings.TrimSpace(line), label+": "); ok {
+			return strings.TrimSpace(after)
 		}
 	}
-	return false
+	t.Fatalf("summary has no %q line\n%s", label, out)
+	return ""
 }
+

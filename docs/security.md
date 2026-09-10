@@ -27,7 +27,7 @@ argument.
 
 ### Treat every path as hostile
 
-- Repository names are validated in `spec.Validate` against
+- Repository names are validated in `config.ValidateProjectName` against
   `^[A-Za-z0-9][A-Za-z0-9._-]*$`, which excludes path separators, `..` and
   leading dashes.
 - When generation lands, every resolved write path must be verified to stay
