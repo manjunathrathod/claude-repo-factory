@@ -8,11 +8,10 @@ standards to every new repository, generate one that arrives with CI, docs,
 tests, coding standards, security rules and a composed `CLAUDE.md` from the
 first commit.
 
-> **Status: milestone 1 of 4.** The plugin architecture, CLI, validation and
-> the interactive `create` flow are complete and tested. **Repository
-> generation is not implemented yet** — `create` resolves and validates your
-> configuration, shows it to you and asks you to confirm, then writes nothing.
-> See [docs/roadmap.md](docs/roadmap.md).
+> **Status: milestone 1 of 4.** The plugin architecture, CLI, validation, the
+> interactive `create` flow and safe workspace creation are complete and
+> tested. **File generation is not implemented yet** — `create` creates the
+> repository directory and stops. See [docs/roadmap.md](docs/roadmap.md).
 
 ## Install
 
@@ -66,7 +65,7 @@ to confirm it:
 ? Programming language: Node.js / TypeScript
 ? Project type: API
 ? Package manager: npm
-? Output directory: services/payment-api
+? Output directory: C:\Projects
 ? Initialize Git? Yes
 ? Include Claude Code setup? Yes
 ? Include GitHub Actions? Yes
@@ -78,20 +77,23 @@ Description: Payment service
 Language: Node.js / TypeScript
 Type: API
 Package Manager: npm
-Output Directory: C:\Projects\services\payment-api
+Output Directory: C:\Projects
 Initialize Git: Yes
 Claude Code Setup: Yes
 GitHub Actions: Yes
 
 ? Create this project? Yes
 Configuration accepted.
+Created C:\Projects\payment-api
+No files were written; template generation lands in the next milestone.
 ```
 
 The package manager question is asked only when the language offers a choice:
 Go has one, so it is skipped; Node.js, Python and Java have several.
 
-> **This milestone stops there.** `create` resolves, validates and confirms a
-> configuration. It writes no files and initialises no Git repository.
+> **This milestone stops there.** `create` resolves and validates the
+> configuration, confirms it, then creates the repository directory. It writes
+> no files into it and initialises no Git repository.
 
 **Or fully from flags, with no prompts.**
 
@@ -100,7 +102,7 @@ claude-repo-factory create widget \
   --language go \
   --type api \
   --description "Widget control plane" \
-  --dir services/widget \
+  --dir C:\Projects \
   --set go_module=github.com/acme/widget \
   --yes
 ```
@@ -119,7 +121,7 @@ writes nothing.
 | `-l, --language` | Language plugin, by id or alias (`node`, `ts`, `py`, `golang`) |
 | `-t, --type` | Project type: `api`, `cli`, `library` or `worker` |
 | `--package-manager` | Package manager for the language, such as `npm`, `uv` or `maven` |
-| `-d, --dir` | The repository directory to create, such as `widget` or `services/widget` (defaults to the project name) |
+| `-d, --dir` | Where to create the repository. The project directory is made *inside* it (defaults to the working directory) |
 | `--description` | One line description |
 | `--author` | Author or owning team |
 | `--license` | SPDX identifier, or `none` (default `MIT`) |
@@ -134,6 +136,27 @@ writes nothing.
 | `--no-docs`, `--no-claude-workflows` | Turn the remaining features off |
 
 A `--no-*` flag always wins over its question: pass it and you are not asked.
+
+### Where the repository is created
+
+`--dir` names the directory the repository is created **inside**, not the
+repository itself:
+
+```
+--dir C:\Projects   +   name payment-api   ->   C:\Projects\payment-api
+```
+
+Omit it and the repository is created in the working directory. The output
+directory is created if it does not exist.
+
+Creation is deliberately conservative:
+
+- an existing **empty** directory is adopted, so re-running after a cancelled
+  attempt works;
+- an existing **non-empty** directory is refused and left untouched — the
+  factory never overwrites someone's work;
+- nothing is created until the configuration has passed validation;
+- nothing is ever written outside the output directory.
 
 ### Exit codes
 

@@ -25,6 +25,10 @@ internal/cli              Cobra commands, flag parsing, plan rendering.
         |                     |
         +---------------------+-- internal/config The typed repository description.
         |
+        +-- internal/generator  Validates, then creates the repository workspace.
+        |         |
+        |         +-- internal/filesystem  Safe directory creation. Imports nothing internal.
+        |
         +-- internal/render     text/template wrapper and naming helpers.
         +-- internal/prompt     Asker interface; survey and scripted implementations.
         +-- internal/gitutil    Testable wrapper around the git command line.
@@ -38,7 +42,12 @@ Dependencies point inward and never the other way:
   implements `config.Catalog` so validation can ask what is registered.
 - `lang` imports `plugin` and `config`. It is the only package with language
   knowledge.
-- `cli` imports `lang`, `plugin`, `config` and `prompt`. It orchestrates.
+- `filesystem` imports nothing internal. It takes a base directory and a
+  single directory name; it knows nothing of repositories or languages.
+- `generator` imports `config` and `filesystem`. It enforces one rule —
+  validation before any filesystem call — and owns nothing else.
+- `cli` imports `lang`, `plugin`, `config`, `prompt` and `generator`. It
+  orchestrates.
 
 ## The three core types
 
@@ -89,10 +98,13 @@ registration — so a mis-wired plugin fails at start-up, not mid-generation.
    language-specific ones.
 6. `cli` prints the summary and asks for confirmation. Validation comes first,
    so a user is never asked to confirm a configuration that cannot work.
-7. `Language.Files` returns the files to write. **Today it returns
-   `plugin.ErrNotImplemented` for every plugin** — generation is the next
-   milestone, so confirming prints `Configuration accepted.` and writes
-   nothing.
+7. On confirmation `generator.Prepare` validates the configuration again — it
+   does not trust its caller — and creates the repository directory through
+   `internal/filesystem`, which confines every operation below the output
+   directory with `os.Root`.
+8. `Language.Files` returns the files to write. **Today it returns
+   `plugin.ErrNotImplemented` for every plugin**, so the directory is created
+   and left empty; file generation is the next milestone.
 
 The command surface itself is documented in [cli.md](cli.md).
 
@@ -106,7 +118,15 @@ subprocesses:
 | --- | --- | --- | --- |
 | Terminal | `prompt.Asker` | `prompt.Survey` | `prompt.Scripted` |
 | Subprocess | `gitutil.Runner` | `gitutil.ExecRunner` | a recording fake |
+| Filesystem | `generator.Workspace` | `filesystem.Workspace` | a recording fake |
+| Workspace creation | `cli.Preparer` | `generator.Generator` | a stub in `cli_test` |
 | Output | `io.Writer` on `App` | `os.Stdout` | `bytes.Buffer` |
+
+`filesystem.Workspace` is the exception that proves the rule: it is the real
+thing in its own tests, driven against `t.TempDir()`. A fake filesystem would
+only assert that the code calls the functions the test expects, which is
+precisely what must not be trusted here — the guarantee is about what ends up
+on a real disk.
 
 ## Composing the generated CLAUDE.md
 

@@ -8,6 +8,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/manjunathrathod/claude-repo-factory/internal/config"
+	"github.com/manjunathrathod/claude-repo-factory/internal/filesystem"
 	"github.com/manjunathrathod/claude-repo-factory/internal/lang"
 	"github.com/manjunathrathod/claude-repo-factory/internal/plugin"
 	"github.com/manjunathrathod/claude-repo-factory/internal/prompt"
@@ -73,9 +74,13 @@ so the command is fully scriptable; --yes accepts every default and never
 prompts, which is what CI and scripts should do.
 
 Answers are validated, printed as a summary and confirmed before anything
-happens. Repository generation is not implemented in this milestone: on
-confirmation the command reports that the configuration was accepted and
-writes nothing to disk.`
+happens. On confirmation the repository directory is created inside the
+output directory: --dir C:\Projects with the name payment-api creates
+C:\Projects\payment-api.
+
+An existing empty directory is adopted; an existing non-empty one is refused
+and left untouched. File generation is not implemented in this milestone, so
+the directory is created and left empty.`
 
 func newNewCommand(app *App) *cobra.Command {
 	opts := &newOptions{}
@@ -100,7 +105,7 @@ func newNewCommand(app *App) *cobra.Command {
 	f.StringVarP(&opts.language, "language", "l", "", "Primary language plugin (see: claude-repo-factory languages)")
 	f.StringVarP(&opts.projectType, "type", "t", "", "Project type: api, cli, library or worker")
 	f.StringVar(&opts.packageManager, "package-manager", "", "Package manager for the language, such as npm, uv or maven")
-	f.StringVarP(&opts.dir, "dir", "d", "", "The repository directory to create, such as widget or services/widget (default: the project name)")
+	f.StringVarP(&opts.dir, "dir", "d", "", "Directory to create the repository inside; the project directory is made within it (default: the working directory)")
 	f.StringVar(&opts.description, "description", "", "One line description of the repository")
 	f.StringVar(&opts.author, "author", "", "Author or owning team")
 	f.StringVar(&opts.license, "license", "", "License identifier, or none")
@@ -138,26 +143,73 @@ func runNew(app *App, cmd *cobra.Command, name string, opts *newOptions) error {
 		return summaryErr
 	}
 
-	fmt.Fprintln(out)
+	// The summary's Output Directory row is the parent, because that is the
+	// question the user answered. The confirmation must not rely on them
+	// doing the join in their head, so the actual target is stated here,
+	// immediately above the prompt that authorises creating it.
+	target, targetErr := cfg.ResolvedProjectDirectory()
+	if targetErr != nil {
+		return fmt.Errorf("resolve target directory: %w", targetErr)
+	}
+	fmt.Fprintf(out, "\nThe repository will be created at %s\n", target)
+
 	confirmed, confirmErr := app.asker(opts.acceptAll).Confirm(promptConfirmCreate,
-		"Nothing is written to disk in this milestone.", true)
+		"Creates the directory above. No files are written in this milestone.", true)
 	if confirmErr != nil {
 		return fmt.Errorf("confirm project creation: %w", confirmErr)
 	}
 	if !confirmed {
-		fmt.Fprintln(out, "Cancelled. No files were written.")
+		fmt.Fprintln(out, "Cancelled. Nothing was created.")
 		return nil
 	}
 
 	fmt.Fprintln(out, "Configuration accepted.")
 
-	// Generation is deliberately not wired up yet. Asking the plugin keeps
-	// this honest: when Files stops returning ErrNotImplemented the command
-	// will fail loudly here rather than silently continuing to do nothing.
+	result, prepErr := app.Generator.Prepare(cmd.Context(), cfg, app.Registry)
+	if prepErr != nil {
+		return explainPrepareFailure(prepErr, cfg)
+	}
+	if result.Created {
+		fmt.Fprintf(out, "Created %s\n", result.Path)
+	} else {
+		fmt.Fprintf(out, "Using existing empty directory %s\n", result.Path)
+	}
+
+	// File generation is deliberately not wired up yet. Asking the plugin
+	// keeps this honest: when Files stops returning ErrNotImplemented the
+	// command will fail loudly here rather than silently doing nothing.
 	if _, err := language.Files(cfg); err != nil && !errors.Is(err, plugin.ErrNotImplemented) {
 		return err
 	}
+	fmt.Fprintln(out, "No files were written; template generation lands in the next milestone.")
 	return nil
+}
+
+// explainPrepareFailure turns a workspace failure into a message that tells
+// the user what to do about it. Refusing to overwrite is the one failure a
+// user is most likely to hit, and "not empty" alone does not say how to
+// proceed.
+func explainPrepareFailure(err error, cfg config.ProjectConfig) error {
+	if !errors.Is(err, filesystem.ErrNotEmpty) {
+		return err
+	}
+	return fmt.Errorf("%w\n\nThe factory never writes into a directory that already has content. Either:\n"+
+		"  - choose a different name:      create <other-name> --dir %s\n"+
+		"  - choose a different location:  create %s --dir <other-directory>\n"+
+		"  - or empty the directory yourself and run the command again",
+		err, quoteIfSpaced(cfg.OutputDirectory), cfg.ProjectName)
+}
+
+// quoteIfSpaced makes a suggested command copy-pasteable when the path needs
+// quoting, and leaves it alone when it does not.
+func quoteIfSpaced(path string) string {
+	if path == "" {
+		return "."
+	}
+	if strings.ContainsAny(path, " \t") {
+		return `"` + path + `"`
+	}
+	return path
 }
 
 // resolveConfig layers flags and prompt answers over the factory defaults and
@@ -205,13 +257,15 @@ func resolveConfig(app *App, name string, opts *newOptions) (config.ProjectConfi
 
 	cfg.OutputDirectory = opts.dir
 	if cfg.OutputDirectory == "" {
-		// The default is the project name, which ResolvedOutputDirectory
-		// turns into a directory of that name under the working directory.
-		// Offering it verbatim keeps the answer portable: the user is never
-		// shown a path with the wrong separator for their platform.
+		// The answer is the *parent*: the repository directory is named by
+		// ProjectName and created inside it. The default must therefore be
+		// "." and never ProjectName — offering the project name here would
+		// resolve to <cwd>/<name> as the parent and nest the repository
+		// inside a directory of its own name.
 		cfg.OutputDirectory, err = asker.Input(promptOutputDir,
-			"The repository directory itself, not its parent: services/widget creates services/widget. Relative paths resolve against the working directory.",
-			cfg.ProjectName)
+			"The directory to create the repository inside. "+cfg.ProjectName+
+				" is created within it, so \".\" puts it in the working directory.",
+			".")
 		if err != nil {
 			return cfg, language, err
 		}

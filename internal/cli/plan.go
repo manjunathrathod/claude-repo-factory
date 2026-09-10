@@ -54,7 +54,9 @@ func artifactsFor(c config.ProjectConfig) []string {
 // milestone, so it is kept deterministic and easy to assert on in tests.
 func writePlan(w io.Writer, cfg config.ProjectConfig, language plugin.Language) error {
 	desc := language.Descriptor()
-	path, err := cfg.ResolvedOutputDirectory()
+	// The repository directory, not its parent: this row answers "where will
+	// this end up", which the summary's Output Directory deliberately does not.
+	path, err := cfg.ResolvedProjectDirectory()
 	if err != nil {
 		return fmt.Errorf("resolve target directory: %w", err)
 	}
