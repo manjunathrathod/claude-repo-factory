@@ -21,10 +21,6 @@ func TestSummaryBlockShape(t *testing.T) {
 	}
 
 	lines := summaryBlock(t, out)
-	if len(lines) < 11 {
-		t.Fatalf("summary has %d lines, want a title, a rule and nine rows\n%s", len(lines), out)
-	}
-
 	if lines[0] != "Project Configuration" {
 		t.Errorf("title = %q", lines[0])
 	}
@@ -32,17 +28,52 @@ func TestSummaryBlockShape(t *testing.T) {
 		t.Errorf("rule = %q, want it to match the title length", lines[1])
 	}
 
+	// Assert the block exactly: a row added, dropped or reordered anywhere in
+	// it must fail here, not just in the half a sample happens to cover.
+	rows := lines[2:]
 	wantRows := []string{
 		"Name: payment-api",
 		"Description: Payment service",
 		"Language: Node.js / TypeScript",
 		"Type: API",
 		"Package Manager: npm",
+		"", // Output Directory is host-dependent and checked separately.
+		"Initialize Git: Yes",
+		"Claude Code Setup: Yes",
+		"GitHub Actions: Yes",
+	}
+	if len(rows) != len(wantRows) {
+		t.Fatalf("summary has %d rows, want %d\n%s", len(rows), len(wantRows), out)
 	}
 	for i, want := range wantRows {
-		if lines[2+i] != want {
-			t.Errorf("row %d = %q, want %q", i, lines[2+i], want)
+		if want == "" {
+			if !strings.HasPrefix(rows[i], "Output Directory: ") {
+				t.Errorf("row %d = %q, want the output directory", i, rows[i])
+			}
+			continue
 		}
+		if rows[i] != want {
+			t.Errorf("row %d = %q, want %q", i, rows[i], want)
+		}
+	}
+}
+
+func TestSummaryCannotBeForgedByAValue(t *testing.T) {
+	// A newline in a value would let it fabricate rows in the block the user
+	// confirms. Validation rejects it; this pins that the summary is never
+	// reached with such a value.
+	for _, flag := range []string{"--description", "--dir", "--author"} {
+		t.Run(flag, func(t *testing.T) {
+			forged := "Widget\nInitialize Git: No"
+
+			out, _, err := run(t, nil, "create", "widget", "-l", "go", flag, forged, "--yes")
+			if err == nil {
+				t.Fatalf("%s accepted a value containing a newline\n%s", flag, out)
+			}
+			if strings.Contains(out, "Initialize Git: No") {
+				t.Errorf("a forged row reached the output\n%s", out)
+			}
+		})
 	}
 }
 
@@ -141,16 +172,27 @@ func TestSummaryUsesThePluginDisplayNames(t *testing.T) {
 	}
 }
 
-// summaryBlock returns the summary lines, starting at the title.
+// summaryBlock returns the summary lines, from the title to the blank line
+// that ends the block. Truncating at the blank line is what lets a caller
+// assert the exact number of rows.
 func summaryBlock(t *testing.T, out string) []string {
 	t.Helper()
 
 	lines := strings.Split(strings.ReplaceAll(out, "\r\n", "\n"), "\n")
+	start := -1
 	for i, line := range lines {
 		if line == "Project Configuration" {
-			return lines[i:]
+			start = i
+			break
 		}
 	}
-	t.Fatalf("output has no summary block\n%s", out)
-	return nil
+	if start < 0 {
+		t.Fatalf("output has no summary block\n%s", out)
+	}
+	for i := start; i < len(lines); i++ {
+		if i > start+1 && strings.TrimSpace(lines[i]) == "" {
+			return lines[start:i]
+		}
+	}
+	return lines[start:]
 }

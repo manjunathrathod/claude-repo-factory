@@ -95,7 +95,13 @@ Go has one, so it is skipped; Node.js, Python and Java have several.
 **Or fully from flags, with no prompts.**
 
 ```bash
-claude-repo-factory create widget   --language go   --type api   --description "Widget control plane"   --dir services   --set go_module=github.com/acme/widget   --yes
+claude-repo-factory create widget \
+  --language go \
+  --type api \
+  --description "Widget control plane" \
+  --dir services/widget \
+  --set go_module=github.com/acme/widget \
+  --yes
 ```
 
 Every prompt has a flag equivalent, and `--yes` makes any invocation
@@ -112,7 +118,7 @@ writes nothing.
 | `-l, --language` | Language plugin, by id or alias (`node`, `ts`, `py`, `golang`) |
 | `-t, --type` | Project type: `api`, `cli`, `library` or `worker` |
 | `--package-manager` | Package manager for the language, such as `npm`, `uv` or `maven` |
-| `-d, --dir` | Target directory (defaults to the project name) |
+| `-d, --dir` | The repository directory to create, such as `widget` or `services/widget` (defaults to the project name) |
 | `--description` | One line description |
 | `--author` | Author or owning team |
 | `--license` | SPDX identifier, or `none` (default `MIT`) |

@@ -25,6 +25,10 @@ const (
 	askActions     = "Include GitHub Actions?"
 	askConfirm     = "Create this project?"
 	askGoModule    = "Go module path"
+
+	// summaryTitleText heads the confirmation block. A rejected configuration
+	// must never reach it.
+	summaryTitleText = "Project Configuration"
 )
 
 // fullyScripted returns an asker with an answer for every question the create
@@ -232,8 +236,7 @@ func TestCreateCancellationStaysMatchable(t *testing.T) {
 				t.Fatalf("error = %v, want it to wrap prompt.ErrInterrupted", err)
 			}
 			if strings.Contains(out, "Configuration accepted.") {
-				t.Errorf("a cancelled run accepted the configuration
-%s", out)
+				t.Errorf("a cancelled run accepted the configuration\n%s", out)
 			}
 		})
 	}
@@ -624,8 +627,7 @@ func TestCreateRejectsInvalidInput(t *testing.T) {
 			// Ordering matters: validation runs before anything is displayed,
 			// so a rejected configuration never reaches the summary.
 			if strings.Contains(out, summaryTitleText) {
-				t.Errorf("a rejected configuration was printed as a summary
-%s", out)
+				t.Errorf("a rejected configuration was printed as a summary\n%s", out)
 			}
 		})
 	}
@@ -641,12 +643,10 @@ func TestCreateRejectsAnUnsafeAnswerFromAPrompt(t *testing.T) {
 
 			out, _, err := run(t, asker, "create")
 			if err == nil {
-				t.Fatalf("create accepted %q from the prompt
-%s", answer, out)
+				t.Fatalf("create accepted %q from the prompt\n%s", answer, out)
 			}
 			if strings.Contains(out, summaryTitleText) {
-				t.Errorf("an unsafe configuration reached the summary
-%s", out)
+				t.Errorf("an unsafe configuration reached the summary\n%s", out)
 			}
 		})
 	}
@@ -744,3 +744,75 @@ func summaryValue(t *testing.T, out, label string) string {
 	return ""
 }
 
+func TestCreatePlanArtifactsFollowTheFeatureFlags(t *testing.T) {
+	// The plan is printed directly above the confirmation, so it must never
+	// promise a file the feature list in the same block says is off.
+	tests := []struct {
+		name     string
+		flags    []string
+		absent   []string
+		stillHas []string
+	}{
+		{
+			name:     "no claude",
+			flags:    []string{"--no-claude"},
+			absent:   []string{".claude/settings.json", ".claude/agents/", ".claude/commands/", "CLAUDE.md"},
+			stillHas: []string{"README.md", ".github/workflows/ci.yml"},
+		},
+		{
+			name:     "no ci",
+			flags:    []string{"--no-ci"},
+			absent:   []string{".github/workflows/ci.yml"},
+			stillHas: []string{"README.md", ".claude/agents/"},
+		},
+		{
+			name:     "no docs",
+			flags:    []string{"--no-docs"},
+			absent:   []string{"docs/architecture.md", "docs/testing.md"},
+			stillHas: []string{"README.md"},
+		},
+		{
+			name:     "everything on",
+			flags:    nil,
+			absent:   nil,
+			stillHas: []string{"README.md", "CLAUDE.md", ".claude/agents/", ".github/workflows/ci.yml", "tests/"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			args := append([]string{"create", "widget", "-l", "go", "--plan", "--yes"}, tt.flags...)
+			out, _, err := run(t, nil, args...)
+			if err != nil {
+				t.Fatalf("create error = %v\n%s", err, out)
+			}
+
+			artifacts := artifactSection(t, out)
+			for _, path := range tt.absent {
+				if strings.Contains(artifacts, path) {
+					t.Errorf("plan promises %q although the feature is off\n%s", path, artifacts)
+				}
+			}
+			for _, path := range tt.stillHas {
+				if !strings.Contains(artifacts, path) {
+					t.Errorf("plan is missing %q\n%s", path, artifacts)
+				}
+			}
+		})
+	}
+}
+
+// artifactSection returns the Artifacts block of the plan.
+func artifactSection(t *testing.T, out string) string {
+	t.Helper()
+
+	start := strings.Index(out, "Artifacts\n")
+	if start < 0 {
+		t.Fatalf("plan has no Artifacts section\n%s", out)
+	}
+	rest := out[start:]
+	if end := strings.Index(rest, "(plus"); end >= 0 {
+		return rest[:end]
+	}
+	return rest
+}

@@ -110,7 +110,15 @@ Two blocks, both deterministic so tests can assert on them:
   typed.
 - **The plan** (`internal/cli/plan.go`, opt-in via `--plan`) additionally
   lists the artifacts generation would produce and the commands that would be
-  recorded in CLAUDE.md and CI.
+  recorded in CLAUDE.md and CI. The artifact list is derived from the feature
+  booleans, so it can never promise a file the feature list above it says is
+  off.
+
+Both blocks are part of the confirmation surface, so neither may be forged.
+Values reach them only after `config.Validate` has rejected control
+characters, and `displayValue` quotes anything non-printable that somehow
+arrives anyway. A newline in a description would otherwise fabricate rows in
+the block the user is agreeing to.
 
 Display text for a language and a project type comes from the plugin
 descriptor (`DisplayName`, `ProjectTypeDisplayName`). The CLI does not invent

@@ -27,6 +27,16 @@ argument.
 
 ### Treat every path as hostile
 
+- The confirmation summary is a security boundary: it is the block a user
+  reads before agreeing. `config.ValidateNoControlCharacters` rejects newlines
+  and escape sequences in every free-text field, so no value can forge a row
+  in it or rewrite the screen. `cli.displayValue` quotes anything
+  non-printable as defence in depth.
+- `config.ValidateRemote` rejects a value git would read as an option, and the
+  `ext::` and `fd::` transports, which execute a command.
+- `config.ValidateOutputDirectory` rejects `..` segments, UNC and device paths,
+  drive-relative paths such as `C:foo`, Windows reserved device names in any
+  segment, and segments ending in a dot or a space.
 - Repository names are validated in `config.ValidateProjectName` against
   `^[A-Za-z0-9][A-Za-z0-9._-]*$`, which excludes path separators, `..` and
   leading dashes.
