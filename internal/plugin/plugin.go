@@ -1,22 +1,26 @@
 // Package plugin defines the extension contract of the factory.
 //
-// The core generator knows nothing about Node.js, Python, Go or Java. It
-// knows only about the Language interface declared here. Adding support for
-// a new language or framework therefore means writing a new implementation
-// of Language and registering it: no change to the generator, the CLI or the
+// The core generator knows nothing about Node.js, Python, Go or Java. It knows
+// only about the Language interface declared here. Adding support for a new
+// language or framework therefore means writing a new implementation of
+// Language and registering it: no change to the generator, the CLI or the
 // CLAUDE.md assembler is required.
+//
+// This package also supplies the answer to "what does this build support":
+// *Registry implements config.Catalog, so validation is performed against the
+// plugins actually registered rather than a list duplicated in the core.
 package plugin
 
 import (
 	"errors"
 	"io/fs"
 
-	"github.com/manjunathrathod/claude-repo-factory/internal/spec"
+	"github.com/manjunathrathod/claude-repo-factory/internal/config"
 )
 
 // ErrNotImplemented is returned by a Language whose file generation has not
-// been built yet. The CLI reports it as a clear "not available" message
-// rather than a crash.
+// been built yet. The CLI reports it as a clear "not available" message rather
+// than a crash.
 var ErrNotImplemented = errors.New("plugin: generation not implemented yet")
 
 // Status describes how far a language plugin has been taken.
@@ -30,10 +34,11 @@ const (
 	StatusPlanned Status = "planned"
 )
 
-// ProjectType is a variant within a language, such as cli, service or
-// library. Plugins own their own project types.
+// ProjectType is one project type as a plugin presents it. The ID comes from
+// the closed factory vocabulary; the display text belongs to the plugin, so
+// two languages can describe the same shape in their own terms.
 type ProjectType struct {
-	ID          string
+	ID          config.ProjectType
 	DisplayName string
 	Summary     string
 }
@@ -41,18 +46,31 @@ type ProjectType struct {
 // Descriptor is the static, spec-independent metadata of a language plugin.
 // The CLI uses it for listing, lookup and prompting.
 type Descriptor struct {
-	ID                 string
-	DisplayName        string
-	Summary            string
-	Aliases            []string
-	Status             Status
-	ProjectTypes       []ProjectType
-	DefaultProjectType string
+	// ID is the canonical language identifier, such as "nodejs".
+	ID config.Language
+	// DisplayName is the human-facing name, such as "Node.js / TypeScript".
+	DisplayName string
+	// Summary is a one-line description of the toolchain.
+	Summary string
+	// Aliases are alternative spellings accepted as input, such as "node".
+	Aliases []string
+	// Status reports whether the plugin can currently be generated.
+	Status Status
+	// ProjectTypes are the shapes this language supports. A plugin may narrow
+	// the factory vocabulary; it may never widen it.
+	ProjectTypes []ProjectType
+	// DefaultProjectType must be one of ProjectTypes.
+	DefaultProjectType config.ProjectType
+	// PackageManagers are the dependency tools this language supports, in the
+	// order they should be offered.
+	PackageManagers []config.PackageManager
+	// DefaultPackageManager must be one of PackageManagers.
+	DefaultPackageManager config.PackageManager
 }
 
 // Command is a named command a generated repository supports, for example
-// test -> go test ./... . These flow into both CLAUDE.md and CI so the two
-// can never disagree about how the project is built.
+// test -> go test ./... . These flow into both CLAUDE.md and CI so the two can
+// never disagree about how the project is built.
 type Command struct {
 	Name        string
 	Run         string
@@ -90,24 +108,24 @@ type FileSpec struct {
 // Language is the contract every language or framework plugin implements.
 //
 // Implementations must be safe for concurrent use and must not mutate the
-// Spec they are handed.
+// ProjectConfig they are handed.
 type Language interface {
 	// Descriptor returns static metadata about the plugin.
 	Descriptor() Descriptor
 	// Instructions returns the CLAUDE.md fragments for this language.
-	Instructions(s spec.Spec) Instructions
+	Instructions(c config.ProjectConfig) Instructions
 	// Files returns the files to generate. Plugins that are not finished
 	// return ErrNotImplemented.
-	Files(s spec.Spec) ([]FileSpec, error)
-	// Validate checks language-specific requirements of a Spec, such as a
-	// mandatory module path. It returns nil when the Spec is acceptable.
-	Validate(s spec.Spec) error
+	Files(c config.ProjectConfig) ([]FileSpec, error)
+	// Validate checks language-specific requirements, such as a mandatory
+	// module path. Language-agnostic rules are config.ProjectConfig.Validate.
+	Validate(c config.ProjectConfig) error
 }
 
 // ProjectTypeIDs returns the project type identifiers of a descriptor in
 // declaration order.
-func (d Descriptor) ProjectTypeIDs() []string {
-	ids := make([]string, 0, len(d.ProjectTypes))
+func (d Descriptor) ProjectTypeIDs() []config.ProjectType {
+	ids := make([]config.ProjectType, 0, len(d.ProjectTypes))
 	for _, pt := range d.ProjectTypes {
 		ids = append(ids, pt.ID)
 	}
@@ -115,9 +133,19 @@ func (d Descriptor) ProjectTypeIDs() []string {
 }
 
 // HasProjectType reports whether id is a project type of this descriptor.
-func (d Descriptor) HasProjectType(id string) bool {
+func (d Descriptor) HasProjectType(id config.ProjectType) bool {
 	for _, pt := range d.ProjectTypes {
 		if pt.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
+// HasPackageManager reports whether m is a package manager of this descriptor.
+func (d Descriptor) HasPackageManager(m config.PackageManager) bool {
+	for _, known := range d.PackageManagers {
+		if known == m {
 			return true
 		}
 	}

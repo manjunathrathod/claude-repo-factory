@@ -41,7 +41,7 @@ What must stay covered, because it is what holds the architecture together:
   duplicate id, an alias claimed by another plugin, an alias colliding with an
   id, and an unknown default project type. `List` sorted, `Available` excludes
   planned, concurrent lookup race-free.
-- **`internal/spec`** — every validation rule, and that all problems are
+- **`internal/config`** — every validation rule, and that all problems are
   reported in one error rather than one per run.
 - **`internal/lang`** — `TestStableLanguagesAreFullyDescribed` enforces that
   each stable plugin declares all five instruction sections, at least one

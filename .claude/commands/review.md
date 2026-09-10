@@ -29,7 +29,7 @@ conditions, races. Every finding needs a concrete failing scenario: these
 inputs, this wrong result.
 
 **2. Architecture.** Blocking findings even when the code works:
-- language knowledge in `internal/spec`, `internal/cli`, `internal/render` or
+- language knowledge in `internal/config`, `internal/cli`, `internal/render` or
   `internal/plugin`;
 - a `switch` on a language name anywhere in the core;
 - inverted dependencies, new package-level mutable state;

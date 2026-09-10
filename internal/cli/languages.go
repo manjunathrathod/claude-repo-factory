@@ -3,11 +3,11 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
-	"strings"
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
 
+	"github.com/manjunathrathod/claude-repo-factory/internal/config"
 	"github.com/manjunathrathod/claude-repo-factory/internal/plugin"
 )
 
@@ -41,13 +41,17 @@ func newLanguagesCommand(app *App) *cobra.Command {
 			}
 
 			w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
-			fmt.Fprintln(w, "ID\tNAME\tSTATUS\tPROJECT TYPES\tSUMMARY")
+			fmt.Fprintln(w, "ID\tNAME\tSTATUS\tPROJECT TYPES\tPACKAGE MANAGERS\tSUMMARY")
 			for _, d := range descriptors {
-				types := strings.Join(d.ProjectTypeIDs(), ", ")
+				types := config.JoinProjectTypes(d.ProjectTypeIDs(), ", ")
 				if types == "" {
 					types = "-"
 				}
-				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", d.ID, d.DisplayName, d.Status, types, d.Summary)
+				managers := config.JoinPackageManagers(d.PackageManagers, ", ")
+				if managers == "" {
+					managers = "-"
+				}
+				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n", d.ID, d.DisplayName, d.Status, types, managers, d.Summary)
 			}
 			return w.Flush()
 		},

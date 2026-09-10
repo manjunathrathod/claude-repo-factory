@@ -11,7 +11,7 @@ func TestNewWithFlagsPrintsThePlan(t *testing.T) {
 	out, _, err := run(t, nil,
 		"new", "widget",
 		"--language", "go",
-		"--type", "service",
+		"--type", "api",
 		"--description", "Widget control plane",
 		"--author", "Platform Team",
 		"--license", "Apache-2.0",
@@ -26,7 +26,7 @@ func TestNewWithFlagsPrintsThePlan(t *testing.T) {
 		"widget",
 		"Widget control plane",
 		"Go (go)",
-		"service",
+		"api",
 		"Platform Team",
 		"Apache-2.0",
 		"github.com/acme/widget",
@@ -39,6 +39,46 @@ func TestNewWithFlagsPrintsThePlan(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("plan is missing %q\n%s", want, out)
 		}
+	}
+}
+
+func TestNewResolvesPackageManager(t *testing.T) {
+	out, _, err := run(t, nil, "new", "widget", "-l", "python", "--package-manager", "poetry", "--yes")
+	if err != nil {
+		t.Fatalf("new error = %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "poetry") {
+		t.Errorf("plan is missing the chosen package manager\n%s", out)
+	}
+}
+
+func TestNewDefaultsThePackageManager(t *testing.T) {
+	out, _, err := run(t, nil, "new", "widget", "-l", "python", "--yes")
+	if err != nil {
+		t.Fatalf("new error = %v\n%s", err, out)
+	}
+	// uv is the declared default for python; a single-manager language such
+	// as go must resolve without asking at all.
+	if !strings.Contains(out, "Package manager  uv") {
+		t.Errorf("plan did not use the declared default package manager\n%s", out)
+	}
+}
+
+func TestNewDoesNotPromptWhenALanguageHasOnePackageManager(t *testing.T) {
+	asker := prompt.NewScripted(map[string]string{
+		"Project type":   "cli",
+		"Go module path": "github.com/acme/widget",
+		"Author":         "Platform Team",
+		"License":        "MIT",
+	})
+	asker.Answers["One line description"] = "Widget"
+
+	_, _, err := run(t, asker, "new", "widget", "-l", "go")
+	if err != nil {
+		t.Fatalf("new error = %v", err)
+	}
+	if containsString(asker.Asked, "Package manager") {
+		t.Error("the user was asked to choose between one package manager")
 	}
 }
 
@@ -57,7 +97,7 @@ func TestNewUsesTheLanguageDefaultProjectType(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new error = %v\n%s", err, out)
 	}
-	if !strings.Contains(out, "Project type    library") {
+	if !strings.Contains(out, "Project type     library") {
 		t.Errorf("plan did not use the default project type\n%s", out)
 	}
 }
@@ -110,12 +150,17 @@ func TestNewRejectsInvalidInput(t *testing.T) {
 		{
 			name:    "unknown project type",
 			args:    []string{"new", "widget", "-l", "go", "-t", "mainframe", "--yes"},
-			wantErr: "unknown project type",
+			wantErr: "must be one of api, cli, library, worker",
 		},
 		{
 			name:    "invalid repository name",
 			args:    []string{"new", "acme/widget", "-l", "go", "--yes"},
-			wantErr: "name:",
+			wantErr: "ProjectName:",
+		},
+		{
+			name:    "project type the language does not offer",
+			args:    []string{"new", "widget", "-l", "go", "-t", "api", "--package-manager", "npm", "--yes"},
+			wantErr: "does not support package manager",
 		},
 		{
 			name:    "malformed set option",

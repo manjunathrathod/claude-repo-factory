@@ -26,12 +26,12 @@ based only on diff text is a guess, and you do not report guesses as facts.
 
 Blocking findings even when the code works:
 
-- language knowledge in `internal/spec`, `internal/cli`, `internal/render` or
+- language knowledge in `internal/config`, `internal/cli`, `internal/render` or
   `internal/plugin` — grep the diff for language names;
 - any `switch` on a language name outside `internal/lang`;
 - an inverted dependency: `plugin` importing `lang`, `spec` importing
   anything internal, a plugin importing `cli`;
-- a plugin mutating the `spec.Spec` it was handed, or calling back into the CLI;
+- a plugin mutating the `config.ProjectConfig` it was handed, or calling back into the CLI;
 - new package-level mutable state;
 - a change to `plugin.Language` with no ADR in `docs/adr/`;
 - a new dependency, a network call, or telemetry.

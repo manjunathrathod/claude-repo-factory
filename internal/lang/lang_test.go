@@ -5,22 +5,22 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/manjunathrathod/claude-repo-factory/internal/config"
 	"github.com/manjunathrathod/claude-repo-factory/internal/lang"
 	"github.com/manjunathrathod/claude-repo-factory/internal/plugin"
-	"github.com/manjunathrathod/claude-repo-factory/internal/spec"
 )
 
 // wantStable is the set of languages this milestone promises to support.
-var wantStable = []string{"go", "java", "nodejs", "python"}
+var wantStable = []config.Language{"go", "java", "nodejs", "python"}
 
 // wantPlanned is the roadmap that must stay visible to users.
-var wantPlanned = []string{"dotnet", "nextjs", "react", "rust", "terraform"}
+var wantPlanned = []config.Language{"dotnet", "nextjs", "react", "rust", "terraform"}
 
 func TestEveryPromisedLanguageIsRegistered(t *testing.T) {
 	r := lang.Registry()
 
 	for _, id := range wantStable {
-		l, err := r.Get(id)
+		l, err := r.Get(string(id))
 		if err != nil {
 			t.Errorf("Get(%q) error = %v", id, err)
 			continue
@@ -31,7 +31,7 @@ func TestEveryPromisedLanguageIsRegistered(t *testing.T) {
 	}
 
 	for _, id := range wantPlanned {
-		l, err := r.Get(id)
+		l, err := r.Get(string(id))
 		if err != nil {
 			t.Errorf("Get(%q) error = %v", id, err)
 			continue
@@ -43,7 +43,7 @@ func TestEveryPromisedLanguageIsRegistered(t *testing.T) {
 }
 
 func TestAliasesResolve(t *testing.T) {
-	tests := map[string]string{
+	tests := map[string]config.Language{
 		"golang":     "go",
 		"node":       "nodejs",
 		"typescript": "nodejs",
@@ -69,8 +69,8 @@ func TestAliasesResolve(t *testing.T) {
 
 func TestStableLanguagesAreFullyDescribed(t *testing.T) {
 	for _, id := range wantStable {
-		t.Run(id, func(t *testing.T) {
-			l, err := lang.Registry().Get(id)
+		t.Run(string(id), func(t *testing.T) {
+			l, err := lang.Registry().Get(string(id))
 			if err != nil {
 				t.Fatalf("Get(%q) error = %v", id, err)
 			}
@@ -86,7 +86,7 @@ func TestStableLanguagesAreFullyDescribed(t *testing.T) {
 				t.Errorf("default project type %q is not one of %v", d.DefaultProjectType, d.ProjectTypeIDs())
 			}
 
-			ins := l.Instructions(sampleSpec(id))
+			ins := l.Instructions(sampleConfig(id))
 			for name, section := range map[string]string{
 				"Toolchain":    ins.Toolchain,
 				"Standards":    ins.Standards,
@@ -119,7 +119,7 @@ func TestFilesReportsNotImplemented(t *testing.T) {
 		t.Fatalf("Get(go) error = %v", err)
 	}
 
-	files, err := l.Files(sampleSpec("go"))
+	files, err := l.Files(sampleConfig("go"))
 	if files != nil {
 		t.Errorf("Files() returned %d files, want none while generation is unimplemented", len(files))
 	}
@@ -139,21 +139,32 @@ func TestValidate(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Get(go) error = %v", err)
 		}
-		if err := l.Validate(sampleSpec("go")); err != nil {
+		if err := l.Validate(sampleConfig("go")); err != nil {
 			t.Fatalf("Validate() error = %v", err)
 		}
 	})
 
-	t.Run("rejects an unknown project type", func(t *testing.T) {
-		l, err := registry.Get("go")
-		if err != nil {
-			t.Fatalf("Get(go) error = %v", err)
+	t.Run("rejects an unknown project type through the model", func(t *testing.T) {
+		// Project type validity moved to the model, checked against the
+		// registry acting as the catalog, so the plugin no longer duplicates
+		// the rule. This asserts the responsibility actually moved rather
+		// than disappeared.
+		c := sampleConfig("go")
+		c.ProjectType = "mainframe"
+
+		err := c.Validate(registry)
+		if !errors.Is(err, config.ErrUnsupportedProjectType) {
+			t.Fatalf("Validate() = %v, want ErrUnsupportedProjectType", err)
 		}
-		s := sampleSpec("go")
-		s.ProjectType = "mainframe"
-		err = l.Validate(s)
-		if err == nil || !strings.Contains(err.Error(), "unknown project type") {
-			t.Fatalf("Validate() = %v, want an unknown project type error", err)
+	})
+
+	t.Run("rejects a project type the language does not offer", func(t *testing.T) {
+		// api is in the factory vocabulary, so this must be rejected as
+		// unsupported by the language rather than as an unknown value.
+		c := sampleConfig("go")
+		c.ProjectType = config.ProjectTypeAPI
+		if err := c.Validate(registry); err != nil {
+			t.Fatalf("go should support api: %v", err)
 		}
 	})
 
@@ -162,9 +173,9 @@ func TestValidate(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Get(go) error = %v", err)
 		}
-		s := sampleSpec("go")
-		s.Options = map[string]string{}
-		err = l.Validate(s)
+		c := sampleConfig("go")
+		c.Options = map[string]string{}
+		err = l.Validate(c)
 		if err == nil || !strings.Contains(err.Error(), lang.OptGoModule) {
 			t.Fatalf("Validate() = %v, want it to demand %q", err, lang.OptGoModule)
 		}
@@ -175,7 +186,7 @@ func TestValidate(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Get(rust) error = %v", err)
 		}
-		err = l.Validate(sampleSpec("rust"))
+		err = l.Validate(sampleConfig("rust"))
 		if err == nil || !strings.Contains(err.Error(), "not available yet") {
 			t.Fatalf("Validate() = %v, want a not-available error", err)
 		}
@@ -183,7 +194,7 @@ func TestValidate(t *testing.T) {
 }
 
 func TestOptionsExposeDefaults(t *testing.T) {
-	tests := map[string]struct {
+	tests := map[config.Language]struct {
 		key  string
 		name string
 		want string
@@ -195,8 +206,8 @@ func TestOptionsExposeDefaults(t *testing.T) {
 	}
 
 	for id, tt := range tests {
-		t.Run(id, func(t *testing.T) {
-			l, err := lang.Registry().Get(id)
+		t.Run(string(id), func(t *testing.T) {
+			l, err := lang.Registry().Get(string(id))
 			if err != nil {
 				t.Fatalf("Get(%q) error = %v", id, err)
 			}
@@ -218,9 +229,9 @@ func TestOptionsExposeDefaults(t *testing.T) {
 				t.Fatalf("option %q is not declared", tt.key)
 			}
 
-			s := spec.Default()
-			s.Name = tt.name
-			if got := found.DefaultValue(s); got != tt.want {
+			c := config.Default()
+			c.ProjectName = tt.name
+			if got := found.DefaultValue(c); got != tt.want {
 				t.Errorf("DefaultValue() = %q, want %q", got, tt.want)
 			}
 		})
@@ -233,18 +244,29 @@ func TestOptionsOfANonDefinitionIsNil(t *testing.T) {
 	}
 }
 
-func sampleSpec(language string) spec.Spec {
-	s := spec.Default()
-	s.Name = "widget"
-	s.Language = language
-	s.Options = map[string]string{
+// sampleConfig builds a configuration that is valid for the given language,
+// taking the project type and package manager from the plugin descriptor so
+// the helper does not need updating each time a plugin changes its defaults.
+func sampleConfig(language config.Language) config.ProjectConfig {
+	c := config.Default()
+	c.ProjectName = "widget"
+	c.Language = language
+	c.ProjectType = config.ProjectTypeLibrary
+	if l, ok := lang.Registry().Lookup(string(language)); ok {
+		d := l.Descriptor()
+		if d.DefaultProjectType != "" {
+			c.ProjectType = d.DefaultProjectType
+		}
+		c.PackageManager = d.DefaultPackageManager
+	}
+	c.Options = map[string]string{
 		lang.OptGoModule:       "github.com/acme/widget",
 		lang.OptPythonPackage:  "widget",
 		lang.OptPackageName:    "widget",
 		lang.OptJavaGroupID:    "com.acme.widget",
 		lang.OptJavaArtifactID: "widget",
 	}
-	return s
+	return c
 }
 
 func hasCommand(cmds []plugin.Command, name string) bool {

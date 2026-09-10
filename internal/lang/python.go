@@ -3,12 +3,19 @@ package lang
 import (
 	"strings"
 
+	"github.com/manjunathrathod/claude-repo-factory/internal/config"
 	"github.com/manjunathrathod/claude-repo-factory/internal/plugin"
-	"github.com/manjunathrathod/claude-repo-factory/internal/spec"
 )
 
 // OptPythonPackage is the importable package name for Python repositories.
 const OptPythonPackage = "python_package"
+
+// Python package managers.
+const (
+	PMPip    config.PackageManager = "pip"
+	PMUv     config.PackageManager = "uv"
+	PMPoetry config.PackageManager = "poetry"
+)
 
 func init() { register(python) }
 
@@ -20,21 +27,23 @@ var python = &Definition{
 		Aliases:     []string{"py", "python3"},
 		Status:      plugin.StatusStable,
 		ProjectTypes: []plugin.ProjectType{
-			{ID: "cli", DisplayName: "CLI", Summary: "Command line tool with a console entry point"},
-			{ID: "library", DisplayName: "Library", Summary: "Distributable package"},
-			{ID: "service", DisplayName: "HTTP service", Summary: "FastAPI service"},
-			{ID: "data", DisplayName: "Data / ML", Summary: "Analysis or model training project"},
+			{ID: config.ProjectTypeAPI, DisplayName: "API", Summary: "FastAPI service"},
+			{ID: config.ProjectTypeCLI, DisplayName: "CLI", Summary: "Command line tool with a console entry point"},
+			{ID: config.ProjectTypeLibrary, DisplayName: "Library", Summary: "Distributable package"},
+			{ID: config.ProjectTypeWorker, DisplayName: "Worker", Summary: "Background processor or data pipeline"},
 		},
-		DefaultProjectType: "library",
+		DefaultProjectType:    config.ProjectTypeLibrary,
+		PackageManagers:       []config.PackageManager{PMUv, PMPip, PMPoetry},
+		DefaultPackageManager: PMUv,
 	},
 	RequiredOptions: []OptionSpec{{
 		Key:      OptPythonPackage,
 		Prompt:   "Python package name",
 		Help:     "Importable package name; lowercase with underscores, for example my_widget.",
 		Required: true,
-		Default:  func(s spec.Spec) string { return pythonIdentifier(s.Name) },
+		Default:  func(c config.ProjectConfig) string { return pythonIdentifier(c.ProjectName) },
 	}},
-	Instruct: func(s spec.Spec) plugin.Instructions {
+	Instruct: func(c config.ProjectConfig) plugin.Instructions {
 		return plugin.Instructions{
 			Toolchain: strings.Join([]string{
 				"- Python 3.12, declared in `pyproject.toml` under `requires-python`.",

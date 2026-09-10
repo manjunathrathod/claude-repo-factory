@@ -12,14 +12,15 @@ reusable workflows, GitHub Actions CI, a `.gitignore`, a docs structure, a
 tests structure, language-specific configuration, and written standards for
 coding, security, testing, architecture and Git.
 
-**Current milestone.** The plugin contract, the registry, the CLI, the
-template engine and the Git wrapper exist. Repository generation does not:
+**Current milestone.** The plugin contract, the registry, the typed project
+configuration model (`config.ProjectConfig`), the CLI, the template engine and
+the Git wrapper exist. Repository generation does not:
 `Language.Files` returns `plugin.ErrNotImplemented` for every plugin, and
 `new` prints the resolved plan instead of writing files. Do not quietly start
 generating files as a side effect of another change.
 
 **The governing constraint.** Adding a language must never require editing
-core generator logic. If a change would make `internal/spec`, `internal/cli`
+core generator logic. If a change would make `internal/config`, `internal/cli`
 or `internal/render` grow a `switch` on language name, the design is wrong.
 Push the behaviour into the plugin.
 
@@ -28,7 +29,7 @@ Push the behaviour into the plugin.
 ```
 cmd/claude-repo-factory/   Entry point. Thin: exit code translation only.
 internal/cli/              Cobra commands, flag parsing, plan rendering.
-internal/spec/             Spec: the resolved, language-agnostic repo description.
+internal/config/           ProjectConfig: the typed, validated repo description.
 internal/plugin/           The Language contract and the registry. No language knowledge.
 internal/lang/             One file per language plugin, plus the shared Definition.
 internal/render/           text/template wrapper and naming helpers.
@@ -41,7 +42,7 @@ docs/                      Architecture, standards and decision records.
 ```
 
 Dependencies point inward: `cli` depends on `lang` and `plugin`; `plugin`
-depends only on `spec`; `spec` depends on nothing internal. Never invert
+depends only on `config`; `config` depends on nothing internal. Never invert
 this.
 
 ## 3. The validation flow
@@ -185,7 +186,7 @@ one package.
    existing table tests then enforce that it is completely described.
 
 Nothing outside `internal/lang` changes. If you find yourself editing
-`internal/cli` or `internal/spec` to add a language, stop and reconsider: the
+`internal/cli` or `internal/config` to add a language, stop and reconsider: the
 missing capability belongs on the `plugin.Language` interface, and changing
 that interface is an ADR-level decision recorded in `docs/adr/`.
 
@@ -231,16 +232,16 @@ same workflow: move it out of `planned.go` into its own file and fill it in.
 
 ## 10. Architecture instructions
 
-- **The core never learns a language name.** `internal/spec`, `internal/cli`
+- **The core never learns a language name.** `internal/config`, `internal/cli`
   and `internal/render` contain no `switch` on language. Language knowledge
   lives only in `internal/lang`.
 - **Extend through the interface.** A new capability that every language
   needs is a new method or field on `plugin.Language`, added deliberately and
   recorded in an ADR — not a special case in the caller.
-- **Data flows one way.** CLI resolves a `spec.Spec` → the plugin reads it →
+- **Data flows one way.** CLI resolves a `config.ProjectConfig` → the plugin reads it →
   the plugin returns files and instructions → the writer renders them. A
   plugin never calls back into the CLI and never mutates the Spec it is given.
-- **Language-specific answers live in `Spec.Options`,** keyed by constants the
+- **Language-specific answers live in `ProjectConfig.Options`,** keyed by constants the
   plugin owns (`lang.OptGoModule`). The core moves them around without
   interpreting them.
 - **Injectable boundaries.** Anything touching the terminal, the filesystem or

@@ -7,7 +7,7 @@ adds a branch to the generator, until the core is a pile of `switch` statements
 that nobody can change safely. The whole structure below exists to make that
 impossible.
 
-**The rule:** the core never learns a language name. `internal/spec`,
+**The rule:** the core never learns a language name. `internal/config`,
 `internal/cli`, `internal/render` and `internal/plugin` contain no reference
 to Go, Python, Node.js or Java. Language knowledge lives only in
 `internal/lang`.
@@ -23,7 +23,7 @@ internal/cli              Cobra commands, flag parsing, plan rendering.
         |         |
         +---------+-- internal/plugin   The Language contract and the registry.
         |                     |
-        +---------------------+-- internal/spec   The resolved repository description.
+        +---------------------+-- internal/config The typed repository description.
         |
         +-- internal/render     text/template wrapper and naming helpers.
         +-- internal/prompt     Asker interface; survey and scripted implementations.
@@ -33,15 +33,16 @@ internal/cli              Cobra commands, flag parsing, plan rendering.
 
 Dependencies point inward and never the other way:
 
-- `spec` imports nothing internal. It is the vocabulary everything shares.
-- `plugin` imports only `spec`. It defines the contract, and knows no language.
-- `lang` imports `plugin` and `spec`. It is the only package with language
+- `config` imports nothing internal. It is the vocabulary everything shares.
+- `plugin` imports only `config`. It defines the contract, knows no language, and
+  implements `config.Catalog` so validation can ask what is registered.
+- `lang` imports `plugin` and `config`. It is the only package with language
   knowledge.
-- `cli` imports `lang`, `plugin`, `spec` and `prompt`. It orchestrates.
+- `cli` imports `lang`, `plugin`, `config` and `prompt`. It orchestrates.
 
 ## The three core types
 
-**`spec.Spec`** is the resolved, language-agnostic description of the
+**`config.ProjectConfig`** is the resolved, language-agnostic description of the
 repository to create: name, description, author, license, target directory,
 branch, remote, the chosen language and project type, feature toggles, and an
 `Options` map. It carries no generation logic.
@@ -56,9 +57,9 @@ around without interpreting them.
 ```go
 type Language interface {
     Descriptor() Descriptor
-    Instructions(s spec.Spec) Instructions
-    Files(s spec.Spec) ([]FileSpec, error)
-    Validate(s spec.Spec) error
+    Instructions(c config.ProjectConfig) Instructions
+    Files(c config.ProjectConfig) ([]FileSpec, error)
+    Validate(c config.ProjectConfig) error
 }
 ```
 

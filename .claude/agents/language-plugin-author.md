@@ -51,7 +51,7 @@ specific and actionable, not generic advice.
 
 ## Hard rules
 
-- You do not edit `internal/cli`, `internal/spec`, `internal/render` or
+- You do not edit `internal/cli`, `internal/config`, `internal/render` or
   `internal/plugin`. If a language genuinely cannot be expressed within the
   current contract, stop, explain precisely what is missing, and propose an
   ADR in `docs/adr/` instead of widening the core yourself.

@@ -54,10 +54,10 @@ apart.
 
 | Language | Status | Project types |
 | --- | --- | --- |
-| Node.js / TypeScript | Supported | cli, library, service |
-| Python | Supported | cli, library, service, data |
-| Go | Supported | cli, library, service |
-| Java | Supported | library, service, cli |
+| Node.js / TypeScript | Supported | api, cli, library, worker |
+| Python | Supported | api, cli, library, worker |
+| Go | Supported | api, cli, library, worker |
+| Java | Supported | api, cli, library, worker |
 | .NET | Planned | |
 | Rust | Planned | |
 | Terraform | Planned | |

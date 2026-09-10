@@ -5,39 +5,47 @@ import (
 	"sort"
 	"strings"
 	"sync"
+
+	"github.com/manjunathrathod/claude-repo-factory/internal/config"
 )
+
+// Registry implements config.Catalog, which is what lets validation ask this
+// build what it supports instead of consulting a list duplicated in the core.
+var _ config.Catalog = (*Registry)(nil)
 
 // Registry holds the known language plugins and resolves user input
 // (identifiers or aliases) to them. The zero value is not usable; call
 // NewRegistry.
 type Registry struct {
 	mu        sync.RWMutex
-	languages map[string]Language
-	aliases   map[string]string
+	languages map[config.Language]Language
+	aliases   map[string]config.Language
 }
 
 // NewRegistry returns an empty registry.
 func NewRegistry() *Registry {
 	return &Registry{
-		languages: map[string]Language{},
-		aliases:   map[string]string{},
+		languages: map[config.Language]Language{},
+		aliases:   map[string]config.Language{},
 	}
 }
 
-// Register adds a language plugin. It fails on an empty or duplicate
-// identifier, or on an alias already claimed by another plugin, so a
-// mis-wired plugin is caught at start-up rather than at generation time.
+// Register adds a language plugin.
+//
+// Every consistency rule a plugin must satisfy is enforced here, so a
+// mis-declared plugin fails at start-up rather than part-way through
+// generating somebody's repository.
 func (r *Registry) Register(l Language) error {
 	if l == nil {
 		return fmt.Errorf("registry: cannot register a nil language")
 	}
 	d := l.Descriptor()
-	id := normalise(d.ID)
+	id := config.ParseLanguage(string(d.ID))
 	if id == "" {
 		return fmt.Errorf("registry: language %q has an empty id", d.DisplayName)
 	}
-	if d.DefaultProjectType != "" && !d.HasProjectType(d.DefaultProjectType) {
-		return fmt.Errorf("registry: language %q declares unknown default project type %q", id, d.DefaultProjectType)
+	if err := validateDescriptor(id, d); err != nil {
+		return err
 	}
 
 	r.mu.Lock()
@@ -54,7 +62,7 @@ func (r *Registry) Register(l Language) error {
 		if owner, taken := r.aliases[a]; taken && owner != id {
 			return fmt.Errorf("registry: alias %q for language %q is already used by %q", a, id, owner)
 		}
-		if _, clash := r.languages[a]; clash {
+		if _, clash := r.languages[config.Language(a)]; clash {
 			return fmt.Errorf("registry: alias %q for language %q collides with a language id", a, id)
 		}
 	}
@@ -64,6 +72,40 @@ func (r *Registry) Register(l Language) error {
 		if a := normalise(alias); a != "" {
 			r.aliases[a] = id
 		}
+	}
+	return nil
+}
+
+// validateDescriptor checks the internal consistency of a descriptor. Planned
+// plugins are held to a lighter standard because they exist only to reserve a
+// name and announce intent.
+func validateDescriptor(id config.Language, d Descriptor) error {
+	for _, pt := range d.ProjectTypes {
+		if !pt.ID.Valid() {
+			return fmt.Errorf("registry: language %q declares project type %q, which is not in the factory vocabulary (%s)",
+				id, pt.ID, config.JoinProjectTypes(config.ProjectTypes(), ", "))
+		}
+	}
+	if d.DefaultProjectType != "" && !d.HasProjectType(d.DefaultProjectType) {
+		return fmt.Errorf("registry: language %q declares unknown default project type %q", id, d.DefaultProjectType)
+	}
+	if d.DefaultPackageManager != "" && !d.HasPackageManager(d.DefaultPackageManager) {
+		return fmt.Errorf("registry: language %q declares unknown default package manager %q", id, d.DefaultPackageManager)
+	}
+	if d.Status != StatusStable {
+		return nil
+	}
+	if len(d.ProjectTypes) == 0 {
+		return fmt.Errorf("registry: stable language %q declares no project types", id)
+	}
+	if len(d.PackageManagers) == 0 {
+		return fmt.Errorf("registry: stable language %q declares no package managers", id)
+	}
+	if d.DefaultProjectType == "" {
+		return fmt.Errorf("registry: stable language %q declares no default project type", id)
+	}
+	if d.DefaultPackageManager == "" {
+		return fmt.Errorf("registry: stable language %q declares no default package manager", id)
 	}
 	return nil
 }
@@ -86,7 +128,7 @@ func (r *Registry) Lookup(name string) (Language, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	if l, ok := r.languages[key]; ok {
+	if l, ok := r.languages[config.Language(key)]; ok {
 		return l, true
 	}
 	if id, ok := r.aliases[key]; ok {
@@ -101,7 +143,53 @@ func (r *Registry) Get(name string) (Language, error) {
 	if l, ok := r.Lookup(name); ok {
 		return l, nil
 	}
-	return nil, fmt.Errorf("unknown language %q (available: %s)", name, strings.Join(r.IDs(), ", "))
+	return nil, fmt.Errorf("unknown language %q (available: %s)",
+		name, config.JoinLanguages(r.Languages(), ", "))
+}
+
+// Resolve implements config.Catalog. It maps an id or alias to the canonical
+// language identifier.
+func (r *Registry) Resolve(name string) (config.Language, bool) {
+	l, ok := r.Lookup(name)
+	if !ok {
+		return "", false
+	}
+	return l.Descriptor().ID, true
+}
+
+// Languages implements config.Catalog. Only stable plugins are reported: a
+// planned language is announced in listings but must never pass validation.
+func (r *Registry) Languages() []config.Language {
+	// Sized from Available rather than from r.languages: reading the map
+	// length here would touch shared state without holding the lock, and
+	// Available takes it for us.
+	available := r.Available()
+	out := make([]config.Language, 0, len(available))
+	for _, l := range available {
+		out = append(out, l.Descriptor().ID)
+	}
+	return out
+}
+
+// ProjectTypes implements config.Catalog.
+func (r *Registry) ProjectTypes(l config.Language) []config.ProjectType {
+	found, ok := r.Lookup(string(l))
+	if !ok {
+		return nil
+	}
+	return found.Descriptor().ProjectTypeIDs()
+}
+
+// PackageManagers implements config.Catalog.
+func (r *Registry) PackageManagers(l config.Language) []config.PackageManager {
+	found, ok := r.Lookup(string(l))
+	if !ok {
+		return nil
+	}
+	d := found.Descriptor()
+	out := make([]config.PackageManager, len(d.PackageManagers))
+	copy(out, d.PackageManagers)
+	return out
 }
 
 // List returns every registered language ordered by identifier.
@@ -119,8 +207,8 @@ func (r *Registry) List() []Language {
 	return out
 }
 
-// Descriptors returns the descriptors of every registered language, ordered
-// by identifier.
+// Descriptors returns the descriptors of every registered language, ordered by
+// identifier.
 func (r *Registry) Descriptors() []Descriptor {
 	langs := r.List()
 	out := make([]Descriptor, 0, len(langs))
@@ -130,10 +218,11 @@ func (r *Registry) Descriptors() []Descriptor {
 	return out
 }
 
-// IDs returns the registered language identifiers in sorted order.
-func (r *Registry) IDs() []string {
+// IDs returns the registered language identifiers in sorted order, including
+// planned ones. Use Languages for the set validation should accept.
+func (r *Registry) IDs() []config.Language {
 	langs := r.List()
-	out := make([]string, 0, len(langs))
+	out := make([]config.Language, 0, len(langs))
 	for _, l := range langs {
 		out = append(out, l.Descriptor().ID)
 	}

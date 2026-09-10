@@ -7,21 +7,22 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/manjunathrathod/claude-repo-factory/internal/config"
 	"github.com/manjunathrathod/claude-repo-factory/internal/lang"
 	"github.com/manjunathrathod/claude-repo-factory/internal/plugin"
 	"github.com/manjunathrathod/claude-repo-factory/internal/prompt"
-	"github.com/manjunathrathod/claude-repo-factory/internal/spec"
 )
 
 // Prompt messages are constants so tests can script answers against them
 // without duplicating literals.
 const (
-	promptName        = "Repository name"
-	promptDescription = "One line description"
-	promptLanguage    = "Primary language"
-	promptProjectType = "Project type"
-	promptAuthor      = "Author"
-	promptLicense     = "License"
+	promptName           = "Repository name"
+	promptDescription    = "One line description"
+	promptLanguage       = "Primary language"
+	promptProjectType    = "Project type"
+	promptPackageManager = "Package manager"
+	promptAuthor         = "Author"
+	promptLicense        = "License"
 )
 
 // defaultDescription is offered when the user gives no description, so that
@@ -32,24 +33,25 @@ var licenseChoices = []prompt.Choice{
 	{Value: "MIT", Label: "MIT"},
 	{Value: "Apache-2.0", Label: "Apache 2.0"},
 	{Value: "BSD-3-Clause", Label: "BSD 3-Clause"},
-	{Value: spec.LicenseUnlicensed, Label: "None (proprietary)"},
+	{Value: config.LicenseUnlicensed, Label: "None (proprietary)"},
 }
 
 type newOptions struct {
-	dir          string
-	language     string
-	projectType  string
-	description  string
-	author       string
-	license      string
-	branch       string
-	remote       string
-	setOptions   []string
-	acceptAll    bool
-	skipGit      bool
-	skipCI       bool
-	skipDocs     bool
-	skipWorkflow bool
+	dir            string
+	language       string
+	projectType    string
+	packageManager string
+	description    string
+	author         string
+	license        string
+	branch         string
+	remote         string
+	setOptions     []string
+	acceptAll      bool
+	skipGit        bool
+	skipCI         bool
+	skipDocs       bool
+	skipWorkflow   bool
 }
 
 const newLong = `Create a new repository configured for professional development and Claude Code.
@@ -82,12 +84,13 @@ func newNewCommand(app *App) *cobra.Command {
 
 	f := cmd.Flags()
 	f.StringVarP(&opts.language, "language", "l", "", "Primary language plugin (see: claude-repo-factory languages)")
-	f.StringVarP(&opts.projectType, "type", "t", "", "Project type within the language, such as cli or service")
+	f.StringVarP(&opts.projectType, "type", "t", "", "Project type: api, cli, library or worker")
+	f.StringVar(&opts.packageManager, "package-manager", "", "Package manager for the language, such as npm, uv or maven")
 	f.StringVarP(&opts.dir, "dir", "d", "", "Directory to create the repository in (default: the repository name)")
 	f.StringVar(&opts.description, "description", "", "One line description of the repository")
 	f.StringVar(&opts.author, "author", "", "Author or owning team")
 	f.StringVar(&opts.license, "license", "", "License identifier, or none")
-	f.StringVar(&opts.branch, "branch", spec.DefaultBranch, "Initial branch name")
+	f.StringVar(&opts.branch, "branch", config.DefaultBranch, "Initial branch name")
 	f.StringVar(&opts.remote, "remote", "", "Git remote URL to register as origin")
 	f.StringArrayVar(&opts.setOptions, "set", nil, "Language specific option as key=value (repeatable)")
 	f.BoolVarP(&opts.acceptAll, "yes", "y", false, "Do not prompt; accept defaults for anything not given as a flag")
@@ -100,104 +103,111 @@ func newNewCommand(app *App) *cobra.Command {
 }
 
 func runNew(app *App, cmd *cobra.Command, name string, opts *newOptions) error {
-	s, language, err := resolveSpec(app, name, opts)
+	cfg, language, err := resolveConfig(app, name, opts)
 	if err != nil {
 		return err
 	}
 
 	out := cmd.OutOrStdout()
-	if planErr := writePlan(out, s, language); planErr != nil {
+	if planErr := writePlan(out, cfg, language); planErr != nil {
 		return planErr
 	}
 
-	_, err = language.Files(s)
+	_, err = language.Files(cfg)
 	if errors.Is(err, plugin.ErrNotImplemented) {
 		fmt.Fprintln(out)
 		fmt.Fprintln(out, "Repository generation is not implemented yet.")
 		fmt.Fprintln(out, "This milestone establishes the plugin contract, the CLI and the")
-		fmt.Fprintln(out, "specification above; file generation lands in the next one.")
+		fmt.Fprintln(out, "configuration above; file generation lands in the next one.")
 		return nil
 	}
 	return err
 }
 
-// resolveSpec layers flags and prompt answers over the factory defaults and
-// validates the result, both generically and against the chosen plugin.
-func resolveSpec(app *App, name string, opts *newOptions) (spec.Spec, plugin.Language, error) {
-	s := spec.Default()
+// resolveConfig layers flags and prompt answers over the factory defaults and
+// validates the result, first against the language-agnostic rules and then
+// against the chosen plugin.
+func resolveConfig(app *App, name string, opts *newOptions) (config.ProjectConfig, plugin.Language, error) {
+	cfg := config.Default()
 	asker := app.asker(opts.acceptAll)
 
 	var err error
 	if name == "" {
 		name, err = asker.Input(promptName, "Used as the directory name and in generated documentation.", "")
 		if err != nil {
-			return s, nil, err
+			return cfg, nil, err
 		}
 	}
-	s.Name = strings.TrimSpace(name)
+	cfg.ProjectName = strings.TrimSpace(name)
 
-	s.Description = opts.description
-	if s.Description == "" {
-		s.Description, err = asker.Input(promptDescription, "Shown at the top of README.md and CLAUDE.md.", defaultDescription)
+	cfg.Description = opts.description
+	if cfg.Description == "" {
+		cfg.Description, err = asker.Input(promptDescription, "Shown at the top of README.md and CLAUDE.md.", defaultDescription)
 		if err != nil {
-			return s, nil, err
+			return cfg, nil, err
 		}
 	}
 
 	language, err := resolveLanguage(app, asker, opts.language)
 	if err != nil {
-		return s, nil, err
+		return cfg, nil, err
 	}
 	desc := language.Descriptor()
-	s.Language = desc.ID
+	// Store the canonical id, never the alias the user typed: two spellings of
+	// one language would break equality and plan output.
+	cfg.Language = desc.ID
 
-	s.ProjectType, err = resolveProjectType(asker, desc, opts.projectType)
+	cfg.ProjectType, err = resolveProjectType(asker, desc, opts.projectType)
 	if err != nil {
-		return s, language, err
+		return cfg, language, err
 	}
 
-	s.Author = opts.author
-	if s.Author == "" {
-		s.Author, err = asker.Input(promptAuthor, "Name or team recorded in the license and documentation.", "")
+	cfg.PackageManager, err = resolvePackageManager(asker, desc, opts.packageManager)
+	if err != nil {
+		return cfg, language, err
+	}
+
+	cfg.Author = opts.author
+	if cfg.Author == "" {
+		cfg.Author, err = asker.Input(promptAuthor, "Name or team recorded in the license and documentation.", "")
 		if err != nil {
-			return s, language, err
+			return cfg, language, err
 		}
 	}
 
-	s.License = opts.license
-	if s.License == "" {
-		s.License, err = asker.Select(promptLicense, "Choose none for proprietary code.", licenseChoices, "MIT")
+	cfg.License = opts.license
+	if cfg.License == "" {
+		cfg.License, err = asker.Select(promptLicense, "Choose none for proprietary code.", licenseChoices, "MIT")
 		if err != nil {
-			return s, language, err
+			return cfg, language, err
 		}
 	}
 
-	s.TargetDir = opts.dir
-	if s.TargetDir == "" {
-		s.TargetDir = s.Name
-	}
-	s.DefaultBranch = opts.branch
-	s.Remote = opts.remote
+	cfg.OutputDirectory = opts.dir
+	cfg.DefaultBranch = opts.branch
+	cfg.Remote = opts.remote
 
-	s.Features.Git = !opts.skipGit
-	s.Features.GitHubActions = !opts.skipCI
-	s.Features.Docs = !opts.skipDocs
-	s.Features.ClaudeWorkflows = !opts.skipWorkflow
+	cfg.InitializeGit = !opts.skipGit
+	cfg.IncludeGitHubActions = !opts.skipCI
+	cfg.IncludeDocs = !opts.skipDocs
+	cfg.IncludeClaudeWorkflows = !opts.skipWorkflow
 
-	if err := applySetOptions(&s, opts.setOptions); err != nil {
-		return s, language, err
+	if err := applySetOptions(&cfg, opts.setOptions); err != nil {
+		return cfg, language, err
 	}
-	if err := resolveLanguageOptions(&s, asker, language); err != nil {
-		return s, language, err
+	if err := resolveLanguageOptions(&cfg, asker, language); err != nil {
+		return cfg, language, err
 	}
 
-	if err := s.Validate(); err != nil {
-		return s, language, fmt.Errorf("invalid repository specification:\n%w", err)
+	// The registry is the catalog: support questions are answered by the
+	// plugins actually registered in this build.
+	if err := cfg.Validate(app.Registry); err != nil {
+		return cfg, language, fmt.Errorf("invalid project configuration: %w", err)
 	}
-	if err := language.Validate(s); err != nil {
-		return s, language, err
+	if err := language.Validate(cfg); err != nil {
+		return cfg, language, err
 	}
-	return s, language, nil
+	return cfg, language, nil
 }
 
 func resolveLanguage(app *App, asker prompt.Asker, flagValue string) (plugin.Language, error) {
@@ -219,7 +229,7 @@ func resolveLanguage(app *App, asker prompt.Asker, flagValue string) (plugin.Lan
 	choices := make([]prompt.Choice, 0, len(available))
 	for _, l := range available {
 		d := l.Descriptor()
-		choices = append(choices, prompt.Choice{Value: d.ID, Label: d.DisplayName + " - " + d.Summary})
+		choices = append(choices, prompt.Choice{Value: string(d.ID), Label: d.DisplayName + " - " + d.Summary})
 	}
 	picked, err := asker.Select(promptLanguage, "Determines the toolchain, standards and CI of the repository.", choices, choices[0].Value)
 	if err != nil {
@@ -228,13 +238,17 @@ func resolveLanguage(app *App, asker prompt.Asker, flagValue string) (plugin.Lan
 	return app.Registry.Get(picked)
 }
 
-func resolveProjectType(asker prompt.Asker, desc plugin.Descriptor, flagValue string) (string, error) {
+func resolveProjectType(asker prompt.Asker, desc plugin.Descriptor, flagValue string) (config.ProjectType, error) {
 	if flagValue != "" {
-		if !desc.HasProjectType(flagValue) {
-			return "", fmt.Errorf("unknown project type %q for %s (available: %s)",
-				flagValue, desc.ID, strings.Join(desc.ProjectTypeIDs(), ", "))
+		pt, err := config.ParseProjectType(flagValue)
+		if err != nil {
+			return "", err
 		}
-		return flagValue, nil
+		if !desc.HasProjectType(pt) {
+			return "", fmt.Errorf("%s does not support project type %q (available: %s)",
+				desc.ID, pt, config.JoinProjectTypes(desc.ProjectTypeIDs(), ", "))
+		}
+		return pt, nil
 	}
 	if len(desc.ProjectTypes) == 0 {
 		return "", nil
@@ -242,39 +256,77 @@ func resolveProjectType(asker prompt.Asker, desc plugin.Descriptor, flagValue st
 
 	choices := make([]prompt.Choice, 0, len(desc.ProjectTypes))
 	for _, pt := range desc.ProjectTypes {
-		choices = append(choices, prompt.Choice{Value: pt.ID, Label: pt.DisplayName + " - " + pt.Summary})
+		choices = append(choices, prompt.Choice{Value: string(pt.ID), Label: pt.DisplayName + " - " + pt.Summary})
 	}
 	def := desc.DefaultProjectType
 	if def == "" {
 		def = desc.ProjectTypes[0].ID
 	}
-	return asker.Select(promptProjectType, "Shapes the generated layout and CI jobs.", choices, def)
+	picked, err := asker.Select(promptProjectType, "Shapes the generated layout and CI jobs.", choices, string(def))
+	if err != nil {
+		return "", err
+	}
+	return config.ProjectType(picked), nil
+}
+
+// resolvePackageManager picks the dependency tool. The valid set is ecosystem
+// knowledge, so it comes from the plugin descriptor rather than from the CLI.
+func resolvePackageManager(asker prompt.Asker, desc plugin.Descriptor, flagValue string) (config.PackageManager, error) {
+	if flagValue != "" {
+		pm := config.ParsePackageManager(flagValue)
+		if !desc.HasPackageManager(pm) {
+			return "", fmt.Errorf("%s does not support package manager %q (available: %s)",
+				desc.ID, pm, config.JoinPackageManagers(desc.PackageManagers, ", "))
+		}
+		return pm, nil
+	}
+	if len(desc.PackageManagers) == 0 {
+		return "", nil
+	}
+	// A language with one package manager has nothing to ask about.
+	if len(desc.PackageManagers) == 1 {
+		return desc.PackageManagers[0], nil
+	}
+
+	choices := make([]prompt.Choice, 0, len(desc.PackageManagers))
+	for _, pm := range desc.PackageManagers {
+		choices = append(choices, prompt.Choice{Value: string(pm), Label: string(pm)})
+	}
+	def := desc.DefaultPackageManager
+	if def == "" {
+		def = desc.PackageManagers[0]
+	}
+	picked, err := asker.Select(promptPackageManager, "Determines the lockfile and the install command in CI.", choices, string(def))
+	if err != nil {
+		return "", err
+	}
+	return config.PackageManager(picked), nil
 }
 
 // resolveLanguageOptions asks for the language-specific answers the selected
 // plugin declares. The CLI knows nothing about what those answers mean.
-func resolveLanguageOptions(s *spec.Spec, asker prompt.Asker, language plugin.Language) error {
+func resolveLanguageOptions(cfg *config.ProjectConfig, asker prompt.Asker, language plugin.Language) error {
 	for _, opt := range lang.Options(language) {
-		if strings.TrimSpace(s.Option(opt.Key, "")) != "" {
+		if strings.TrimSpace(cfg.Option(opt.Key, "")) != "" {
 			continue
 		}
-		answer, err := asker.Input(opt.Prompt, opt.Help, opt.DefaultValue(*s))
+		answer, err := asker.Input(opt.Prompt, opt.Help, opt.DefaultValue(*cfg))
 		if err != nil {
 			return err
 		}
-		s.SetOption(opt.Key, strings.TrimSpace(answer))
+		cfg.SetOption(opt.Key, strings.TrimSpace(answer))
 	}
 	return nil
 }
 
-func applySetOptions(s *spec.Spec, pairs []string) error {
+func applySetOptions(cfg *config.ProjectConfig, pairs []string) error {
 	for _, pair := range pairs {
 		key, value, found := strings.Cut(pair, "=")
 		key = strings.TrimSpace(key)
 		if !found || key == "" {
 			return fmt.Errorf("invalid --set value %q: expected key=value", pair)
 		}
-		s.SetOption(key, strings.TrimSpace(value))
+		cfg.SetOption(key, strings.TrimSpace(value))
 	}
 	return nil
 }

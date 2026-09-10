@@ -13,7 +13,7 @@ whole project exists to protect.
 
 **Adding a language must never require changing core generator logic.**
 
-`internal/spec`, `internal/cli`, `internal/render` and `internal/plugin`
+`internal/config`, `internal/cli`, `internal/render` and `internal/plugin`
 contain no language name and no `switch` on one. All language knowledge lives
 in `internal/lang`. If a proposed design would break that, it is wrong
 regardless of how convenient it is.
@@ -38,7 +38,7 @@ gitutil  imports nothing internal. Subprocess boundary.
 Rules that follow:
 
 - A plugin never calls back into the CLI and never mutates the Spec it is
-  handed. `spec.Spec` is passed by value precisely to make that structural.
+  handed. `config.ProjectConfig` is passed by value precisely to make that structural.
 - Language-specific answers travel in `Spec.Options`, keyed by constants the
   plugin owns. The core moves them without interpreting them.
 - Anything touching a terminal, a filesystem or a subprocess sits behind an
@@ -55,7 +55,7 @@ Ask, in this order:
    `plugin.Language`, or a new field on `Instructions`. This is a contract
    change: it touches every plugin, so it needs an ADR before code.
 3. **Is it about the repository rather than the language?** It belongs to the
-   factory — `spec.Spec`, `spec.Features`, or the universal template set.
+   factory — `config.ProjectConfig`, `config.ProjectConfig` toggles, or the universal template set.
 4. **Is it about how output is produced?** `internal/render` or the future
    writer, and it must stay language-blind.
 

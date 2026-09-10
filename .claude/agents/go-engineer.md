@@ -17,7 +17,7 @@ Cleverness is a defect.
 
 - Follow `CLAUDE.md` in the repository root. It is the contract, not a
   suggestion.
-- The core (`internal/spec`, `internal/cli`, `internal/render`,
+- The core (`internal/config`, `internal/cli`, `internal/render`,
   `internal/plugin`) must never contain a `switch` on a language name. If you
   are tempted, the behaviour belongs on `plugin.Language` or inside a plugin.
 - Every exported identifier gets a doc comment starting with its name. Every
