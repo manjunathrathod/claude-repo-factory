@@ -134,7 +134,9 @@ These extend the flow rather than reordering it. CI runs all of them.
 
 ## 5. Go instructions
 
-- Go 1.24 or newer, as pinned by the `go` directive in `go.mod`.
+- Go 1.25 or newer, as pinned by the `go` directive in `go.mod`. The floor
+  is 1.25 because the patched `golang.org/x/sys` and `golang.org/x/text` that
+  clear GO-2026-5024 and GO-2026-5970 require it.
 - `gofmt` is the only formatter. Unformatted code fails CI.
 - Every exported identifier has a doc comment starting with its own name.
   Every package has a package comment.

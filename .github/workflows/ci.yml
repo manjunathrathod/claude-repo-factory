@@ -13,9 +13,29 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# setup-go pins GOTOOLCHAIN=local, so every tool installed below must build
+# with GO_VERSION exactly — a tool whose go directive is newer cannot pull a
+# toolchain to rescue itself. That is why these are exact pins and not
+# @latest: @latest silently starts requiring a newer Go and the job breaks on
+# a day nobody changed anything.
 env:
-  GO_VERSION: "1.24"
-  GOLANGCI_VERSION: "v2.1.6"
+  GO_VERSION: "1.25"
+  # golangci-lint refuses to load a module whose go directive is newer than
+  # the Go version golangci-lint itself was built with. v2.9.0 is the first
+  # release that requires Go 1.25, so it is the lowest version that can lint
+  # this module. Raising GO_VERSION means checking this pin again.
+  GOLANGCI_VERSION: "v2.9.0"
+  # v1.8.0 requires Go 1.26; v1.7.0 is the newest that builds on Go 1.25.
+  GOVULNCHECK_VERSION: "v1.7.0"
+
+# Windows runners default to PowerShell, which splits an argument such as
+# -coverprofile=coverage.txt into "-coverprofile=coverage" and ".txt", so the
+# test job asked Go to build a package called ".txt". Bash is present on every
+# runner image, so pinning it here makes each matrix leg run the identical
+# command instead of one dialect per operating system.
+defaults:
+  run:
+    shell: bash
 
 jobs:
   # The validation flow, in its canonical order:
@@ -143,5 +163,5 @@ jobs:
 
       - name: govulncheck
         run: |
-          go install golang.org/x/vuln/cmd/govulncheck@latest
+          go install golang.org/x/vuln/cmd/govulncheck@${{ env.GOVULNCHECK_VERSION }}
           govulncheck ./...

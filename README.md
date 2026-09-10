@@ -9,9 +9,10 @@ tests, coding standards, security rules and a composed `CLAUDE.md` from the
 first commit.
 
 > **Status: milestone 1 of 4.** The plugin architecture, CLI, validation and
-> planning are complete and tested. **Repository generation is not
-> implemented yet** — `new` resolves your specification and prints the plan it
-> would carry out. See [docs/roadmap.md](docs/roadmap.md).
+> the interactive `create` flow are complete and tested. **Repository
+> generation is not implemented yet** — `create` resolves and validates your
+> configuration, shows it to you and asks you to confirm, then writes nothing.
+> See [docs/roadmap.md](docs/roadmap.md).
 
 ## Install
 
@@ -27,7 +28,7 @@ cd claude-repo-factory
 make build          # produces bin/claude-repo-factory
 ```
 
-Requires Go 1.24 or newer.
+Requires Go 1.25 or newer.
 
 ## Use
 

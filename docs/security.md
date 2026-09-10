@@ -36,7 +36,10 @@ argument.
   `ext::` and `fd::` transports, which execute a command.
 - `config.ValidateOutputDirectory` rejects `..` segments, UNC and device paths,
   drive-relative paths such as `C:foo`, Windows reserved device names in any
-  segment, and segments ending in a dot or a space.
+  segment, and segments ending in a dot or a space. It normalises both `/` and
+  `\` on every platform rather than using `filepath.ToSlash`, which converts
+  only the host separator: validation must not depend on where it runs, or a
+  backslash traversal rejected on Windows would be accepted on Linux.
 - Repository names are validated in `config.ValidateProjectName` against
   `^[A-Za-z0-9][A-Za-z0-9._-]*$`, which excludes path separators, `..` and
   leading dashes.

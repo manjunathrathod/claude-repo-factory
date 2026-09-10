@@ -124,6 +124,9 @@ func runNew(app *App, cmd *cobra.Command, name string, opts *newOptions) error {
 		return err
 	}
 
+	// Each step names its own error rather than reusing or shadowing the one
+	// above: govet rejects the shadow and gocritic rejects the reassignment,
+	// and distinct names are what the rest of this package already does.
 	out := cmd.OutOrStdout()
 	if opts.showPlan {
 		if planErr := writePlan(out, cfg, language); planErr != nil {
@@ -131,15 +134,15 @@ func runNew(app *App, cmd *cobra.Command, name string, opts *newOptions) error {
 		}
 		fmt.Fprintln(out)
 	}
-	if err := writeSummary(out, cfg, language.Descriptor()); err != nil {
-		return err
+	if summaryErr := writeSummary(out, cfg, language.Descriptor()); summaryErr != nil {
+		return summaryErr
 	}
 
 	fmt.Fprintln(out)
-	confirmed, err := app.asker(opts.acceptAll).Confirm(promptConfirmCreate,
+	confirmed, confirmErr := app.asker(opts.acceptAll).Confirm(promptConfirmCreate,
 		"Nothing is written to disk in this milestone.", true)
-	if err != nil {
-		return fmt.Errorf("confirm project creation: %w", err)
+	if confirmErr != nil {
+		return fmt.Errorf("confirm project creation: %w", confirmErr)
 	}
 	if !confirmed {
 		fmt.Fprintln(out, "Cancelled. No files were written.")

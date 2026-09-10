@@ -1,8 +1,13 @@
 # Binaries
+#
+# The binary shares its name with cmd/claude-repo-factory, so these two
+# patterns must stay anchored to the repository root. Unanchored, they match
+# at any depth and silently exclude the entry point directory itself, which
+# builds fine locally and then fails on a fresh clone.
 /bin/
 /dist/
-claude-repo-factory
-claude-repo-factory.exe
+/claude-repo-factory
+/claude-repo-factory.exe
 *.exe
 *.dll
 *.so
