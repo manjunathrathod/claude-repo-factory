@@ -1,0 +1,108 @@
+# golangci-lint configuration for claude-repo-factory.
+#
+# The ruleset is deliberately strict: this project generates other projects,
+# so its own standards are the standards it advertises. Do not weaken a
+# linter to make a change pass; fix the code or justify a narrow nolint with
+# an explanation on the same line.
+version: "2"
+
+run:
+  timeout: 5m
+  tests: true
+
+linters:
+  default: none
+  enable:
+    - bodyclose
+    - copyloopvar
+    - errcheck
+    - errorlint
+    - goconst
+    - gocritic
+    - gosec
+    - govet
+    - ineffassign
+    - misspell
+    - nakedret
+    - nilerr
+    - noctx
+    - prealloc
+    - revive
+    - staticcheck
+    - unconvert
+    - unparam
+    - unused
+    - usestdlibvars
+    - whitespace
+
+  settings:
+    errcheck:
+      check-type-assertions: true
+      check-blank: true
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - performance
+        - style
+      disabled-checks:
+        - whyNoLint
+      settings:
+        hugeParam:
+          # spec.Spec is 88 bytes and is deliberately passed by value: that is
+          # what guarantees a language plugin cannot mutate the specification
+          # it was handed. The immutability is worth the copy, so the
+          # threshold sits above it rather than the invariant being dropped.
+          sizeThreshold: 128
+        rangeValCopy:
+          sizeThreshold: 128
+    govet:
+      enable-all: true
+      disable:
+        - fieldalignment
+    misspell:
+      # No locale is enforced. Prose in this repository uses British spelling,
+      # but technical identifiers must keep their canonical form: Maven really
+      # does call it artifactId, and "serialization" is the name of the Java
+      # mechanism. Locking misspell to one locale would flag those as errors.
+      ignore-rules:
+        - artifact
+        - artifacts
+        - serialization
+    revive:
+      rules:
+        - name: exported
+          arguments:
+            - disableStutteringCheck
+        - name: package-comments
+        - name: indent-error-flow
+        - name: error-strings
+        - name: error-naming
+        - name: context-as-argument
+        - name: unexported-return
+
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - std-error-handling
+    rules:
+      # Test files may use long literals and repeated strings freely; the
+      # readability of a table test beats deduplication.
+      - path: _test\.go
+        linters:
+          - goconst
+          - gosec
+          - unparam
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/manjunathrathod/claude-repo-factory
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0

@@ -1,0 +1,36 @@
+# Binaries
+/bin/
+/dist/
+claude-repo-factory
+claude-repo-factory.exe
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Test and coverage output
+*.test
+*.out
+coverage.txt
+coverage.html
+
+# Go workspace files
+go.work
+go.work.sum
+
+# Editors and IDEs
+.idea/
+.vscode/
+*.swp
+*~
+
+# OS noise
+.DS_Store
+Thumbs.db
+
+# Local Claude Code state (project config under .claude IS committed)
+.claude/settings.local.json
+
+# Scratch output from manual CLI runs
+/tmp/
+/scratch/
