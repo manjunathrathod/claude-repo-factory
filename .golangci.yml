@@ -48,13 +48,21 @@ linters:
         - whyNoLint
       settings:
         hugeParam:
-          # spec.Spec is 88 bytes and is deliberately passed by value: that is
-          # what guarantees a language plugin cannot mutate the specification
-          # it was handed. The immutability is worth the copy, so the
-          # threshold sits above it rather than the invariant being dropped.
-          sizeThreshold: 128
+          # config.ProjectConfig (184 bytes) and plugin.Descriptor (168) are
+          # deliberately passed by value: that is what guarantees a language
+          # plugin cannot mutate the configuration or the metadata it was
+          # handed, which is the one-way data flow the architecture rests on.
+          # Passing them by pointer would trade a documented invariant for a
+          # copy this tool makes a few dozen times per run.
+          #
+          # The threshold is therefore set just above the larger of the two,
+          # so a genuinely oversized parameter is still reported. Raise it
+          # only when a by-value type grows for a reason worth the same
+          # argument; it was last widened when Feature 1 replaced spec.Spec
+          # (88 bytes) with config.ProjectConfig.
+          sizeThreshold: 192
         rangeValCopy:
-          sizeThreshold: 128
+          sizeThreshold: 192
     govet:
       enable-all: true
       disable:
