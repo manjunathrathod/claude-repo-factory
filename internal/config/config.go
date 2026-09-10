@@ -149,7 +149,7 @@ func (c ProjectConfig) OptionKeys() []string {
 // and OutputDirectory "C:\\Projects", this returns "C:\\Projects" and the
 // repository is created at "C:\\Projects\\payment-api". Keeping the two apart
 // is what lets the filesystem layer treat the parent as a boundary and the
-// project name as a single segment inside it.
+// project name as a single segment inside it. See ADR 0004.
 //
 // Call Validate first: this method resolves a path, it does not vet one.
 func (c ProjectConfig) ResolvedOutputDirectory() (string, error) {

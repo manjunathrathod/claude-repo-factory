@@ -15,6 +15,12 @@ import (
 	"github.com/manjunathrathod/claude-repo-factory/internal/prompt"
 )
 
+// fakePath is what the stub reports as the created directory. It is a fixed
+// sentinel rather than ResolvedProjectDirectory: computing it the way the
+// production code does would make any test asserting on the printed path agree
+// with whatever that method happens to do, bug included.
+const fakePath = "<fake>/created-directory"
+
 // fakeGenerator records what the command asked to be created without touching
 // a filesystem. It is the default for CLI tests: the command layer's job is to
 // resolve a configuration and hand it over, and a test of that should not be
@@ -24,24 +30,23 @@ type fakeGenerator struct {
 	configs []config.ProjectConfig
 	// err, when set, is returned instead of creating anything.
 	err error
-	// created overrides the reported Created flag.
-	created bool
+	// created and gitInitialized override the reported flags.
+	created        bool
+	gitInitialized bool
 }
 
-func newFakeGenerator() *fakeGenerator { return &fakeGenerator{created: true} }
-
-// fakePath is what the stub reports as the created directory. It is a fixed
-// sentinel rather than ResolvedProjectDirectory: computing it the way the
-// production code does would make any test asserting on the printed path
-// agree with whatever that method happens to do, bug included.
-const fakePath = "<fake>/created-directory"
+func newFakeGenerator() *fakeGenerator { return &fakeGenerator{created: true, gitInitialized: true} }
 
 func (f *fakeGenerator) Prepare(_ context.Context, cfg config.ProjectConfig, _ config.Catalog) (generator.Result, error) {
 	f.configs = append(f.configs, cfg)
 	if f.err != nil {
 		return generator.Result{}, f.err
 	}
-	return generator.Result{Path: fakePath, Created: f.created}, nil
+	return generator.Result{
+		Path:           fakePath,
+		Created:        f.created,
+		GitInitialized: f.gitInitialized && cfg.InitializeGit,
+	}, nil
 }
 
 // run executes the command tree with the given arguments and returns what it

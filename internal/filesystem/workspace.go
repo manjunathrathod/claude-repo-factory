@@ -29,6 +29,11 @@ import (
 // deliberately not world-writable.
 const DefaultDirMode fs.FileMode = 0o755
 
+// MaxSegmentLength bounds a directory name, well under the 255 bytes a
+// filesystem component usually allows, because the name also becomes part of
+// longer paths beneath it.
+const MaxSegmentLength = 64
+
 // Failures are grouped under these sentinels so a caller can react to a
 // category without matching on message text.
 var (
@@ -75,8 +80,8 @@ func (w Workspace) dirMode() fs.FileMode {
 // Create makes the directory called name inside base and returns its absolute
 // path.
 //
-// base is created if it does not exist; name must be a single path segment,
-// so a repository can never be placed anywhere but directly inside base. An
+// base is created if it does not exist; name must be a single path segment, so
+// a repository can never be placed anywhere but directly inside base. An
 // existing empty directory is adopted rather than treated as an error, which
 // is what makes re-running the command after a cancelled attempt work. An
 // existing non-empty directory is refused with ErrNotEmpty: overwriting
@@ -114,8 +119,7 @@ func (w Workspace) Create(ctx context.Context, base, name string) (Result, error
 	// the root itself was chosen. MkdirAll above follows symlinks, so on a
 	// shared machine another user could swap a component of absBase between
 	// that call and OpenRoot and re-anchor the root somewhere else. Comparing
-	// the resolved path with the requested one closes that window: a base that
-	// is reached through a link is reported rather than silently accepted.
+	// the resolved path with the requested one closes that window.
 	if err := verifyBaseNotRedirected(absBase); err != nil {
 		return Result{}, err
 	}
@@ -163,12 +167,9 @@ func verifyBaseNotRedirected(absBase string) error {
 		// A base that cannot be resolved is not usable as a boundary.
 		return fmt.Errorf("resolve base directory %s: %w", absBase, err)
 	}
-	if resolved == absBase {
-		return nil
-	}
-	// A case-insensitive filesystem, or a path already free of links, can
-	// differ only in spelling; that is not a redirection.
-	if strings.EqualFold(resolved, absBase) {
+	// A case-insensitive filesystem can differ only in spelling; that is not
+	// a redirection.
+	if resolved == absBase || strings.EqualFold(resolved, absBase) {
 		return nil
 	}
 	return fmt.Errorf("%w: %s resolves to %s", ErrBaseRedirected, absBase, resolved)
@@ -194,54 +195,6 @@ func isEmpty(root *os.Root, name string) (bool, error) {
 	return len(entries) == 0, nil
 }
 
-// ValidateSegment reports whether name is a single, ordinary directory name.
-//
-// It is exported because it is the rule that makes the rest safe, and a caller
-// may want to apply it before doing work that would be wasted. Anything that
-// could address a different directory is refused: an empty name, "." or "..",
-// any name containing a separator on any platform, and any absolute or
-// drive-qualified path. os.Root would refuse an escape anyway; rejecting it
-// here means the caller gets an explanation instead of a syscall error.
-func ValidateSegment(name string) error {
-	switch {
-	case strings.TrimSpace(name) == "":
-		return fmt.Errorf("%w: must not be empty", ErrUnsafeName)
-	case name != strings.TrimSpace(name):
-		return fmt.Errorf("%w: %q must not begin or end with whitespace", ErrUnsafeName, name)
-	case name == "." || name == "..":
-		return fmt.Errorf("%w: %q addresses a directory other than itself", ErrUnsafeName, name)
-	case strings.ContainsAny(name, `/\`):
-		return fmt.Errorf("%w: %q must be a single directory name, not a path", ErrUnsafeName, name)
-	case strings.Contains(name, ".."):
-		return fmt.Errorf("%w: %q must not contain %q", ErrUnsafeName, name, "..")
-	case filepath.IsAbs(name) || filepath.VolumeName(name) != "":
-		return fmt.Errorf("%w: %q must be relative to the output directory", ErrUnsafeName, name)
-	case strings.ContainsFunc(name, unicode.IsControl):
-		// Rejecting these here is what lets the errors above print paths
-		// plainly: a name that cannot hold a newline or an escape sequence
-		// cannot forge a line of output when it is echoed back.
-		return fmt.Errorf("%w: %q must not contain control characters", ErrUnsafeName, name)
-	case strings.Contains(name, ":"):
-		// filepath.VolumeName only sees a colon at index 1, so "widget:evil"
-		// would otherwise pass and name an NTFS alternate data stream.
-		return fmt.Errorf("%w: %q must not contain %q", ErrUnsafeName, name, ":")
-	case strings.HasSuffix(name, "."):
-		// Windows silently strips a trailing dot, so the directory created
-		// would not be the one the caller was told about.
-		return fmt.Errorf("%w: %q must not end with %q", ErrUnsafeName, name, ".")
-	case isReservedDeviceName(name):
-		return fmt.Errorf("%w: %q is a reserved device name on Windows", ErrUnsafeName, name)
-	case len(name) > MaxSegmentLength:
-		return fmt.Errorf("%w: %q must be %d characters or fewer", ErrUnsafeName, name, MaxSegmentLength)
-	}
-	return nil
-}
-
-// MaxSegmentLength bounds a directory name, well under the 255 bytes a
-// filesystem component usually allows, because the name also becomes part of
-// longer paths beneath it.
-const MaxSegmentLength = 64
-
 // reservedDeviceNames cannot be used as a file or directory name on Windows,
 // with or without an extension. They are rejected on every platform so a
 // repository created on one stays usable on another.
@@ -262,4 +215,48 @@ func isReservedDeviceName(name string) bool {
 	}
 	_, reserved := reservedDeviceNames[strings.ToLower(base)]
 	return reserved
+}
+
+// ValidateSegment reports whether name is a single, ordinary directory name.
+//
+// It is exported because it is the rule that makes the rest safe, and a caller
+// may want to apply it before doing work that would be wasted. Anything that
+// could address a different directory is refused. os.Root would refuse an
+// escape anyway; rejecting it here means the caller gets an explanation
+// instead of a syscall error, and it keeps this package's definition of "safe"
+// at least as strict as config.ValidateProjectName — otherwise the two-layer
+// defence would only hold in one direction.
+func ValidateSegment(name string) error {
+	switch {
+	case strings.TrimSpace(name) == "":
+		return fmt.Errorf("%w: must not be empty", ErrUnsafeName)
+	case name != strings.TrimSpace(name):
+		return fmt.Errorf("%w: %q must not begin or end with whitespace", ErrUnsafeName, name)
+	case name == "." || name == "..":
+		return fmt.Errorf("%w: %q addresses a directory other than itself", ErrUnsafeName, name)
+	case strings.ContainsAny(name, `/\`):
+		return fmt.Errorf("%w: %q must be a single directory name, not a path", ErrUnsafeName, name)
+	case strings.Contains(name, ".."):
+		return fmt.Errorf("%w: %q must not contain %q", ErrUnsafeName, name, "..")
+	case filepath.IsAbs(name) || filepath.VolumeName(name) != "":
+		return fmt.Errorf("%w: %q must be relative to the output directory", ErrUnsafeName, name)
+	case strings.ContainsFunc(name, unicode.IsControl):
+		// Rejecting these is what lets the errors above print paths plainly: a
+		// name that cannot hold a newline or an escape sequence cannot forge a
+		// line of output when it is echoed back.
+		return fmt.Errorf("%w: %q must not contain control characters", ErrUnsafeName, name)
+	case strings.Contains(name, ":"):
+		// filepath.VolumeName only sees a colon at index 1, so "widget:evil"
+		// would otherwise pass and name an NTFS alternate data stream.
+		return fmt.Errorf("%w: %q must not contain %q", ErrUnsafeName, name, ":")
+	case strings.HasSuffix(name, "."):
+		// Windows silently strips a trailing dot, so the directory created
+		// would not be the one the caller was told about.
+		return fmt.Errorf("%w: %q must not end with %q", ErrUnsafeName, name, ".")
+	case isReservedDeviceName(name):
+		return fmt.Errorf("%w: %q is a reserved device name on Windows", ErrUnsafeName, name)
+	case len(name) > MaxSegmentLength:
+		return fmt.Errorf("%w: %q must be %d characters or fewer", ErrUnsafeName, name, MaxSegmentLength)
+	}
+	return nil
 }

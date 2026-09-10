@@ -25,13 +25,13 @@ internal/cli              Cobra commands, flag parsing, plan rendering.
         |                     |
         +---------------------+-- internal/config The typed repository description.
         |
-        +-- internal/generator  Validates, then creates the repository workspace.
+        +-- internal/generator  Validates, then creates the workspace and inits git.
         |         |
         |         +-- internal/filesystem  Safe directory creation. Imports nothing internal.
+        |         +-- internal/gitutil     git init behind a fixed-argument exec wrapper.
         |
         +-- internal/render     text/template wrapper and naming helpers.
         +-- internal/prompt     Asker interface; survey and scripted implementations.
-        +-- internal/gitutil    Testable wrapper around the git command line.
         +-- internal/version    Build identity.
 ```
 
@@ -44,8 +44,10 @@ Dependencies point inward and never the other way:
   knowledge.
 - `filesystem` imports nothing internal. It takes a base directory and a
   single directory name; it knows nothing of repositories or languages.
-- `generator` imports `config` and `filesystem`. It enforces one rule —
-  validation before any filesystem call — and owns nothing else.
+- `gitutil` imports nothing internal either. It is the only package in the
+  tool that starts a subprocess.
+- `generator` imports `config`, `filesystem` and `gitutil`. It enforces one
+  rule — validation before any side effect — and owns nothing else.
 - `cli` imports `lang`, `plugin`, `config`, `prompt` and `generator`. It
   orchestrates.
 
@@ -102,7 +104,10 @@ registration — so a mis-wired plugin fails at start-up, not mid-generation.
    does not trust its caller — and creates the repository directory through
    `internal/filesystem`, which confines every operation below the output
    directory with `os.Root`.
-8. `Language.Files` returns the files to write. **Today it returns
+8. When `InitializeGit` is set, `generator` calls `gitutil.Repository.Init`
+   with the directory it has just created. Git runs nowhere else, makes no
+   commits and configures no remotes.
+9. `Language.Files` returns the files to write. **Today it returns
    `plugin.ErrNotImplemented` for every plugin**, so the directory is created
    and left empty; file generation is the next milestone.
 
@@ -119,14 +124,36 @@ subprocesses:
 | Terminal | `prompt.Asker` | `prompt.Survey` | `prompt.Scripted` |
 | Subprocess | `gitutil.Runner` | `gitutil.ExecRunner` | a recording fake |
 | Filesystem | `generator.Workspace` | `filesystem.Workspace` | a recording fake |
+| Git | `generator.Git` | `gitutil.Repository` | a recording fake |
 | Workspace creation | `cli.Preparer` | `generator.Generator` | a stub in `cli_test` |
 | Output | `io.Writer` on `App` | `os.Stdout` | `bytes.Buffer` |
 
-`filesystem.Workspace` is the exception that proves the rule: it is the real
-thing in its own tests, driven against `t.TempDir()`. A fake filesystem would
-only assert that the code calls the functions the test expects, which is
+Two of these are the real thing in their own tests. `filesystem.Workspace` is
+driven against `t.TempDir()`, and `gitutil` has integration tests that run a
+real `git init` and skip when git is absent. A fake filesystem or a fake git
+would only assert that the code calls the functions the test expects, which is
 precisely what must not be trusted here — the guarantee is about what ends up
 on a real disk.
+
+## How git is kept safe
+
+`internal/gitutil` is the only package in the tool that starts a subprocess,
+and it is written so that there is nothing for user input to escape from:
+
+- **No shell, ever.** `exec.CommandContext` receives a fixed executable name
+  and an explicit `[]string` of arguments. There is no command string, so
+  there is no quoting to get wrong and no metacharacter to interpret. A branch
+  name of `main; rm -rf /` is passed to git as one inert argument, and a test
+  asserts exactly that.
+- **A fixed argument list.** `Repository` exposes only `Init`. Commits,
+  remotes and anything reaching a network are not reachable through it.
+- **A validated working directory.** `ValidateWorkingDirectory` requires an
+  existing, absolute, non-symlink directory before git is invoked, so the
+  command can never run somewhere the caller did not mean — a relative path
+  would otherwise resolve against the factory's own working directory.
+- **Errors that say nothing about the environment.** A missing git produces an
+  instruction to install it, or to pass `--no-git`. It does not print `PATH`,
+  the resolved executable location, or any environment variable.
 
 ## Composing the generated CLAUDE.md
 

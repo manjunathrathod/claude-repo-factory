@@ -28,7 +28,8 @@ root would be a second thing to keep in sync for no gain.
 ## What `create` does
 
 ```
-flags + prompts -> config.ProjectConfig -> Validate -> summary -> confirm -> create
+flags + prompts -> config.ProjectConfig -> Validate -> summary -> confirm
+  -> create directory -> git init
 ```
 
 1. `resolveConfig` starts from `config.Default()`, which enables every
@@ -44,16 +45,18 @@ flags + prompts -> config.ProjectConfig -> Validate -> summary -> confirm -> cre
    asked. A user is never asked to confirm a configuration that cannot work.
 
 On confirmation the command hands the configuration to `generator.Prepare`,
-which validates it again and creates the repository directory through
-`internal/filesystem`. File generation is not implemented: the directory is
-created and left empty.
+which validates it again, creates the repository directory through
+`internal/filesystem`, and initialises git through `internal/gitutil` unless
+`--no-git` was given. File generation is not implemented: the directory is
+created, git is initialised, and nothing is written inside it.
 
 `--dir` is the **parent**. `--dir C:\Projects` with the name `payment-api`
-creates `C:\Projects\payment-api`; `config.ResolvedOutputDirectory` returns the
-parent and `config.ResolvedProjectDirectory` returns the repository itself.
-The summary shows the parent, because that is what the user answered; the
-`--plan` block and the closing line show the repository directory, because
-that is where the work lands.
+creates `C:\Projects\payment-api`; `config.ResolvedOutputDirectory` returns
+the parent and `config.ResolvedProjectDirectory` returns the repository
+itself. The summary shows the parent, because that is what the user
+answered; the target is printed on its own line immediately above the
+confirmation prompt, so the gate never shows one path while creating
+another.
 
 ## The nine questions
 
@@ -144,6 +147,7 @@ the selected language, the defaults, cancellation, declining the
 confirmation, and the error message for each class of invalid input.
 
 Creation is faked by default. `run` injects a stub preparer so a test of the
-command layer cannot litter the working tree; `runWith` takes an explicit one,
-and the handful of tests that must see a real directory pass the production
-generator together with a `t.TempDir()` output directory.
+command layer cannot litter the working tree; `runWith` takes an explicit
+one, and the tests that must see a real directory or a real `.git` pass the
+production generator together with a `t.TempDir()` output directory. Those
+skip when git is not installed.

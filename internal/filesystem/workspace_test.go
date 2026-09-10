@@ -190,6 +190,9 @@ func TestCreateRejectsUnsafeNames(t *testing.T) {
 		{name: "carriage return", input: "wid\rget"},
 		{name: "ANSI escape", input: "widget\x1b[2J"},
 		{name: "NUL", input: "wid\x00get"},
+		{name: "alternate data stream", input: "widget:evil"},
+		{name: "trailing dot", input: "widget."},
+		{name: "reserved device name", input: "nul"},
 	}
 
 	for _, tt := range tests {
@@ -246,8 +249,8 @@ func TestCreateTouchesNothingButTheTarget(t *testing.T) {
 			}
 
 			after := treeOf(t, root)
-			// Compared both ways: added() alone would pass a Create that
-			// deleted a sibling, which the name of this test forbids.
+			// Compared both ways: additions alone would let a Create that
+			// deleted a sibling pass, which the name of this test forbids.
 			if gone := added(after, before); len(gone) != 0 {
 				t.Errorf("Create removed %v", gone)
 			}
@@ -256,6 +259,7 @@ func TestCreateTouchesNothingButTheTarget(t *testing.T) {
 			} else if string(got) != "keep" {
 				t.Errorf("sibling file = %q, want it untouched", got)
 			}
+
 			gotNew := added(before, after)
 			want := make([]string, 0, len(tt.wantNew))
 			for _, n := range tt.wantNew {
@@ -307,8 +311,8 @@ func TestCreateIsRepeatable(t *testing.T) {
 }
 
 func TestCreateUsesANonWorldWritableMode(t *testing.T) {
-	// Windows has no Unix permission bits: Go reports 0777 for every
-	// directory there, so the assertion is only meaningful on Unix.
+	// Windows has no Unix permission bits: Go reports 0777 for every directory
+	// there, so the assertion is only meaningful on Unix.
 	if runtime.GOOS == "windows" {
 		t.Skip("permission bits are not modelled on Windows")
 	}
@@ -329,6 +333,70 @@ func TestCreateUsesANonWorldWritableMode(t *testing.T) {
 	}
 }
 
+func TestCreateReportsABaseReachedThroughASymlink(t *testing.T) {
+	// The package claims confinement; a base that is itself a link would put
+	// the repository somewhere other than the path reported back.
+	if runtime.GOOS == "windows" {
+		t.Skip("creating symlinks on Windows needs elevation")
+	}
+
+	root := t.TempDir()
+	actual := filepath.Join(root, "actual")
+	link := filepath.Join(root, "link")
+	if err := os.Mkdir(actual, 0o755); err != nil {
+		t.Fatalf("prepare: %v", err)
+	}
+	if err := os.Symlink(actual, link); err != nil {
+		t.Fatalf("prepare symlink: %v", err)
+	}
+
+	var w filesystem.Workspace
+	_, err := w.Create(context.Background(), link, "widget")
+	if !errors.Is(err, filesystem.ErrBaseRedirected) {
+		t.Fatalf("Create() error = %v, want ErrBaseRedirected", err)
+	}
+	entries, readErr := os.ReadDir(actual)
+	if readErr != nil {
+		t.Fatalf("read actual directory: %v", readErr)
+	}
+	if len(entries) != 0 {
+		t.Errorf("a redirected base still created %d entries", len(entries))
+	}
+}
+
+func TestCreateRefusesToFollowASymlinkedTarget(t *testing.T) {
+	// A link at base/name pointing outside base must not become a way to write
+	// there. os.Root enforces this; this proves we rely on it correctly rather
+	// than falling through to Mkdir.
+	if runtime.GOOS == "windows" {
+		t.Skip("creating symlinks on Windows needs elevation")
+	}
+
+	root := t.TempDir()
+	base := filepath.Join(root, "base")
+	outside := filepath.Join(root, "outside")
+	for _, d := range []string{base, outside} {
+		if err := os.Mkdir(d, 0o755); err != nil {
+			t.Fatalf("prepare: %v", err)
+		}
+	}
+	if err := os.Symlink(outside, filepath.Join(base, "widget")); err != nil {
+		t.Fatalf("prepare symlink: %v", err)
+	}
+
+	var w filesystem.Workspace
+	if _, err := w.Create(context.Background(), base, "widget"); err == nil {
+		t.Fatal("Create() = nil error, want the escaping symlink to be refused")
+	}
+	entries, err := os.ReadDir(outside)
+	if err != nil {
+		t.Fatalf("read outside directory: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Errorf("wrote %d entries through a symlink that escapes the base", len(entries))
+	}
+}
+
 func TestValidateSegment(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -341,6 +409,8 @@ func TestValidateSegment(t *testing.T) {
 		{name: "dots", input: "acme.widget"},
 		{name: "single dot inside", input: "v1.2"},
 		{name: "digits", input: "2fa"},
+		{name: "com0 is not reserved", input: "com0"},
+		{name: "at the length limit", input: strings.Repeat("a", filesystem.MaxSegmentLength)},
 
 		{name: "empty", input: "", wantErr: true},
 		{name: "dot", input: ".", wantErr: true},
@@ -353,22 +423,14 @@ func TestValidateSegment(t *testing.T) {
 		{name: "volume", input: "C:x", wantErr: true},
 		{name: "newline", input: "a\nb", wantErr: true},
 		{name: "escape sequence", input: "a\x1bb", wantErr: true},
-		// A colon anywhere names an NTFS alternate data stream;
-		// filepath.VolumeName only notices one at index 1.
 		{name: "alternate data stream", input: "widget:evil", wantErr: true},
 		{name: "trailing colon", input: "widget:", wantErr: true},
-		// Windows strips a trailing dot, so the directory created would not be
-		// the one the caller was told about.
 		{name: "trailing dot", input: "widget.", wantErr: true},
-		// config.ValidateProjectName rejects these; so must this, or the
-		// defence-in-depth claim is only true in one direction.
 		{name: "reserved device name", input: "nul", wantErr: true},
-		{name: "reserved device name uppercase", input: "CON", wantErr: true},
-		{name: "reserved device name with extension", input: "nul.txt", wantErr: true},
+		{name: "reserved uppercase", input: "CON", wantErr: true},
+		{name: "reserved with extension", input: "nul.txt", wantErr: true},
 		{name: "reserved lpt9", input: "lpt9", wantErr: true},
-		{name: "com0 is not reserved", input: "com0"},
 		{name: "over the length limit", input: strings.Repeat("a", filesystem.MaxSegmentLength+1), wantErr: true},
-		{name: "at the length limit", input: strings.Repeat("a", filesystem.MaxSegmentLength)},
 	}
 
 	for _, tt := range tests {
@@ -423,70 +485,4 @@ func added(before, after []string) []string {
 	}
 	sort.Strings(out)
 	return out
-}
-
-func TestCreateReportsABaseReachedThroughASymlink(t *testing.T) {
-	// The package claims confinement; a base that is itself a link would put
-	// the repository somewhere other than the path reported back, so it is
-	// refused rather than silently followed.
-	if runtime.GOOS == "windows" {
-		t.Skip("creating symlinks on Windows needs elevation")
-	}
-
-	root := t.TempDir()
-	target := filepath.Join(root, "real")
-	link := filepath.Join(root, "link")
-	if err := os.Mkdir(target, 0o755); err != nil {
-		t.Fatalf("prepare: %v", err)
-	}
-	if err := os.Symlink(target, link); err != nil {
-		t.Fatalf("prepare symlink: %v", err)
-	}
-
-	var w filesystem.Workspace
-	_, err := w.Create(context.Background(), link, "widget")
-	if !errors.Is(err, filesystem.ErrBaseRedirected) {
-		t.Fatalf("Create() error = %v, want ErrBaseRedirected", err)
-	}
-	// Nothing may have been created through the link.
-	entries, readErr := os.ReadDir(target)
-	if readErr != nil {
-		t.Fatalf("read real directory: %v", readErr)
-	}
-	if len(entries) != 0 {
-		t.Errorf("a redirected base still created %d entries", len(entries))
-	}
-}
-
-func TestCreateRefusesToFollowASymlinkedTarget(t *testing.T) {
-	// A link at base/name pointing outside base must not become a way to
-	// write there. os.Root is what enforces this; the test proves we rely on
-	// it correctly rather than falling through to Mkdir.
-	if runtime.GOOS == "windows" {
-		t.Skip("creating symlinks on Windows needs elevation")
-	}
-
-	root := t.TempDir()
-	base := filepath.Join(root, "base")
-	outside := filepath.Join(root, "outside")
-	for _, d := range []string{base, outside} {
-		if err := os.Mkdir(d, 0o755); err != nil {
-			t.Fatalf("prepare: %v", err)
-		}
-	}
-	if err := os.Symlink(outside, filepath.Join(base, "widget")); err != nil {
-		t.Fatalf("prepare symlink: %v", err)
-	}
-
-	var w filesystem.Workspace
-	if _, err := w.Create(context.Background(), base, "widget"); err == nil {
-		t.Fatal("Create() = nil error, want the escaping symlink to be refused")
-	}
-	entries, err := os.ReadDir(outside)
-	if err != nil {
-		t.Fatalf("read outside directory: %v", err)
-	}
-	if len(entries) != 0 {
-		t.Errorf("wrote %d entries through a symlink that escapes the base", len(entries))
-	}
 }

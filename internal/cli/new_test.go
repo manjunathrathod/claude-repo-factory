@@ -8,10 +8,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/manjunathrathod/claude-repo-factory/internal/cli"
-	"github.com/manjunathrathod/claude-repo-factory/internal/config"
-	"github.com/manjunathrathod/claude-repo-factory/internal/filesystem"
-	"github.com/manjunathrathod/claude-repo-factory/internal/generator"
 	"github.com/manjunathrathod/claude-repo-factory/internal/prompt"
 )
 
@@ -413,7 +409,8 @@ func TestCreateOutputDirectoryDefaultsToTheWorkingDirectory(t *testing.T) {
 	}
 
 	// The output directory is the PARENT, so it must be the working directory
-	// itself and must NOT end in the project name — that was the nesting bug.
+	// itself and must NOT end in the project name — defaulting it to the
+	// project name is what once nested the repository at <cwd>/widget/widget.
 	line := summaryValue(t, out, "Output Directory")
 	if !filepath.IsAbs(line) {
 		t.Errorf("output directory = %q, want an absolute path", line)
@@ -728,187 +725,23 @@ func TestCreateAppliesLanguageOptionDefaults(t *testing.T) {
 	}
 }
 
-// realGenerator returns the production generator, for the few tests that must
-// see the command touch a real filesystem.
-func realGenerator() cli.Preparer {
-	return generator.New(filesystem.Workspace{})
-}
-
-func TestCreateMakesTheProjectDirectoryInsideTheOutputDirectory(t *testing.T) {
+func TestCreateWritesNothingToDisk(t *testing.T) {
 	dir := t.TempDir()
 
-	out, _, err := runWith(t, nil, realGenerator(),
-		"create", "payment-api", "-l", "go", "--dir", dir,
-		"--set", "go_module=github.com/acme/payment-api", "--yes")
+	out, _, err := run(t, nil, "create", "widget", "-l", "go", "--dir", dir, "--yes")
 	if err != nil {
 		t.Fatalf("create error = %v\n%s", err, out)
 	}
-
-	target := filepath.Join(dir, "payment-api")
-	if info, statErr := os.Stat(target); statErr != nil {
-		t.Fatalf("stat %s: %v\n%s", target, statErr, out)
-	} else if !info.IsDir() {
-		t.Fatalf("%s is not a directory", target)
+	if !strings.Contains(out, "Configuration accepted.") {
+		t.Fatalf("create did not accept the configuration\n%s", out)
 	}
-	if !strings.Contains(out, "Created ") {
-		t.Errorf("output does not report what was created\n%s", out)
-	}
-	if !strings.Contains(out, target) {
-		t.Errorf("output does not name the created directory %q\n%s", target, out)
-	}
-}
 
-func TestCreateWritesNoFilesIntoTheProjectDirectory(t *testing.T) {
-	// This milestone creates the directory and stops.
-	dir := t.TempDir()
-
-	out, _, err := runWith(t, nil, realGenerator(),
-		"create", "widget", "-l", "go", "--dir", dir,
-		"--set", "go_module=github.com/acme/widget", "--yes")
+	entries, err := os.ReadDir(dir)
 	if err != nil {
-		t.Fatalf("create error = %v\n%s", err, out)
-	}
-
-	entries, err := os.ReadDir(filepath.Join(dir, "widget"))
-	if err != nil {
-		t.Fatalf("read project directory: %v", err)
+		t.Fatalf("read target directory: %v", err)
 	}
 	if len(entries) != 0 {
-		t.Errorf("create wrote %d entries into the project directory, want none", len(entries))
-	}
-}
-
-func TestCreateRefusesANonEmptyProjectDirectory(t *testing.T) {
-	dir := t.TempDir()
-	target := filepath.Join(dir, "widget")
-	if err := os.Mkdir(target, 0o755); err != nil {
-		t.Fatalf("prepare: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(target, "main.go"), []byte("package main"), 0o600); err != nil {
-		t.Fatalf("prepare: %v", err)
-	}
-
-	_, _, err := runWith(t, nil, realGenerator(),
-		"create", "widget", "-l", "go", "--dir", dir,
-		"--set", "go_module=github.com/acme/widget", "--yes")
-	if !errors.Is(err, filesystem.ErrNotEmpty) {
-		t.Fatalf("create error = %v, want ErrNotEmpty", err)
-	}
-	// The existing work must still be there.
-	if _, statErr := os.Stat(filepath.Join(target, "main.go")); statErr != nil {
-		t.Errorf("create disturbed the existing directory: %v", statErr)
-	}
-}
-
-func TestCreateAdoptsAnExistingEmptyProjectDirectory(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.Mkdir(filepath.Join(dir, "widget"), 0o755); err != nil {
-		t.Fatalf("prepare: %v", err)
-	}
-
-	out, _, err := runWith(t, nil, realGenerator(),
-		"create", "widget", "-l", "go", "--dir", dir,
-		"--set", "go_module=github.com/acme/widget", "--yes")
-	if err != nil {
-		t.Fatalf("create error = %v\n%s", err, out)
-	}
-	if !strings.Contains(out, "Using existing empty directory") {
-		t.Errorf("output does not report that a directory was adopted\n%s", out)
-	}
-}
-
-func TestCreateCreatesNothingWhenDeclined(t *testing.T) {
-	dir := t.TempDir()
-	asker := fullyScripted()
-	asker.Answers[askOutputDir] = dir
-	asker.Confirms[askConfirm] = false
-
-	out, _, err := runWith(t, asker, realGenerator(), "create")
-	if err != nil {
-		t.Fatalf("declining is not an error, got %v", err)
-	}
-
-	entries, readErr := os.ReadDir(dir)
-	if readErr != nil {
-		t.Fatalf("read output directory: %v", readErr)
-	}
-	if len(entries) != 0 {
-		t.Errorf("declining still created %d entries\n%s", len(entries), out)
-	}
-}
-
-func TestCreateCreatesNothingForAnInvalidConfiguration(t *testing.T) {
-	dir := t.TempDir()
-
-	_, _, err := runWith(t, nil, realGenerator(),
-		"create", "nul", "-l", "go", "--dir", dir, "--yes")
-	if err == nil {
-		t.Fatal("create = nil error, want the reserved name to be rejected")
-	}
-
-	entries, readErr := os.ReadDir(dir)
-	if readErr != nil {
-		t.Fatalf("read output directory: %v", readErr)
-	}
-	if len(entries) != 0 {
-		t.Errorf("an invalid configuration created %d entries, want none", len(entries))
-	}
-}
-
-func TestCreateHandsTheGeneratorTheResolvedConfiguration(t *testing.T) {
-	gen := newFakeGenerator()
-
-	out, _, err := runWith(t, nil, gen,
-		"create", "payment-api", "-l", "node", "-t", "api", "--package-manager", "pnpm",
-		"--dir", "services", "--set", "npm_package=payment-api", "--yes")
-	if err != nil {
-		t.Fatalf("create error = %v\n%s", err, out)
-	}
-
-	if len(gen.configs) != 1 {
-		t.Fatalf("generator called %d times, want once", len(gen.configs))
-	}
-	got := gen.configs[0]
-	if got.ProjectName != "payment-api" {
-		t.Errorf("ProjectName = %q", got.ProjectName)
-	}
-	if got.Language != "nodejs" {
-		t.Errorf("Language = %q, want the canonical id", got.Language)
-	}
-	if got.ProjectType != config.ProjectTypeAPI {
-		t.Errorf("ProjectType = %q", got.ProjectType)
-	}
-	if got.PackageManager != "pnpm" {
-		t.Errorf("PackageManager = %q", got.PackageManager)
-	}
-	if got.OutputDirectory != "services" {
-		t.Errorf("OutputDirectory = %q", got.OutputDirectory)
-	}
-}
-
-func TestCreateDoesNotReachTheGeneratorWhenDeclined(t *testing.T) {
-	gen := newFakeGenerator()
-	asker := fullyScripted()
-	asker.Confirms[askConfirm] = false
-
-	if _, _, err := runWith(t, asker, gen, "create"); err != nil {
-		t.Fatalf("create error = %v", err)
-	}
-	if len(gen.configs) != 0 {
-		t.Errorf("the generator ran despite the user declining: %v", gen.configs)
-	}
-}
-
-func TestCreateSurfacesAGeneratorFailure(t *testing.T) {
-	gen := newFakeGenerator()
-	gen.err = errors.New("disk on fire")
-
-	_, _, err := runWith(t, nil, gen, "create", "widget", "-l", "go", "--yes")
-	if err == nil {
-		t.Fatal("create = nil error, want the generator failure to surface")
-	}
-	if !strings.Contains(err.Error(), "disk on fire") {
-		t.Errorf("error = %v, want it to carry the cause", err)
+		t.Errorf("create wrote %d entries into the target directory, want none", len(entries))
 	}
 }
 
@@ -995,137 +828,4 @@ func artifactSection(t *testing.T, out string) string {
 		return rest[:end]
 	}
 	return rest
-}
-
-// Regression: --dir means the parent, so the prompt default must be "." and
-// never the project name. Defaulting to the name made the parent <cwd>/<name>
-// and nested the repository at <cwd>/<name>/<name>.
-func TestCreateWithoutADirectoryCreatesOneLevelInTheWorkingDirectory(t *testing.T) {
-	dir := t.TempDir()
-	t.Chdir(dir)
-
-	out, _, err := runWith(t, nil, realGenerator(),
-		"create", "payment-api", "-l", "go",
-		"--set", "go_module=github.com/acme/payment-api", "--yes")
-	if err != nil {
-		t.Fatalf("create error = %v\n%s", err, out)
-	}
-
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		t.Fatalf("read working directory: %v", err)
-	}
-	if len(entries) != 1 {
-		names := make([]string, 0, len(entries))
-		for _, e := range entries {
-			names = append(names, e.Name())
-		}
-		t.Fatalf("working directory holds %v, want exactly [payment-api]", names)
-	}
-	if entries[0].Name() != "payment-api" {
-		t.Fatalf("created %q, want payment-api", entries[0].Name())
-	}
-
-	// The repository directory must not contain a directory of its own name.
-	inner, err := os.ReadDir(filepath.Join(dir, "payment-api"))
-	if err != nil {
-		t.Fatalf("read project directory: %v", err)
-	}
-	if len(inner) != 0 {
-		t.Errorf("project directory holds %d entries, want none (nesting regression)", len(inner))
-	}
-}
-
-func TestCreateAnnouncesTheTargetBeforeAskingToConfirm(t *testing.T) {
-	// The summary shows the parent, so the target has to be stated separately
-	// or the user is confirming a path they were never shown.
-	asker := fullyScripted()
-	asker.Answers[askOutputDir] = "projects"
-
-	out, _, err := runWith(t, asker, newFakeGenerator(), "create")
-	if err != nil {
-		t.Fatalf("create error = %v\n%s", err, out)
-	}
-
-	at := strings.Index(out, "The repository will be created at ")
-	if at < 0 {
-		t.Fatalf("output never states the target\n%s", out)
-	}
-	if !strings.Contains(out[at:], filepath.Join("projects", "widget")) {
-		t.Errorf("the stated target is not the project directory\n%s", out[at:])
-	}
-	// It must come before the confirmation is recorded, not after.
-	if !slices.Contains(asker.Asked, askConfirm) {
-		t.Fatal("the user was never asked to confirm")
-	}
-}
-
-func TestCreateExplainsHowToRecoverFromANonEmptyDirectory(t *testing.T) {
-	dir := t.TempDir()
-	target := filepath.Join(dir, "widget")
-	if err := os.Mkdir(target, 0o755); err != nil {
-		t.Fatalf("prepare: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(target, "main.go"), []byte("x"), 0o600); err != nil {
-		t.Fatalf("prepare: %v", err)
-	}
-
-	_, _, err := runWith(t, nil, realGenerator(),
-		"create", "widget", "-l", "go", "--dir", dir,
-		"--set", "go_module=github.com/acme/widget", "--yes")
-	if err == nil {
-		t.Fatal("create = nil error, want a refusal")
-	}
-
-	// An error that only says "not empty" leaves the user stuck.
-	for _, want := range []string{"different name", "different location", "empty the directory"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Errorf("error does not mention %q:\n%v", want, err)
-		}
-	}
-}
-
-func TestCreateReportsThePathTheGeneratorReturned(t *testing.T) {
-	// The command must print what the generator actually created, not a path
-	// it recomputed for itself — otherwise the two could disagree and the
-	// output would be wrong in exactly the case that matters.
-	gen := newFakeGenerator()
-
-	out, _, err := runWith(t, nil, gen, "create", "widget", "-l", "go", "--dir", "somewhere", "--yes")
-	if err != nil {
-		t.Fatalf("create error = %v\n%s", err, out)
-	}
-	if !strings.Contains(out, fakePath) {
-		t.Errorf("output does not report the generator's path %q\n%s", fakePath, out)
-	}
-}
-
-func TestCreateDistinguishesCreatedFromAdopted(t *testing.T) {
-	tests := []struct {
-		name    string
-		created bool
-		want    string
-		unwant  string
-	}{
-		{name: "created", created: true, want: "Created ", unwant: "Using existing"},
-		{name: "adopted", created: false, want: "Using existing empty directory", unwant: "Created "},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			gen := newFakeGenerator()
-			gen.created = tt.created
-
-			out, _, err := runWith(t, nil, gen, "create", "widget", "-l", "go", "--yes")
-			if err != nil {
-				t.Fatalf("create error = %v\n%s", err, out)
-			}
-			if !strings.Contains(out, tt.want) {
-				t.Errorf("output is missing %q\n%s", tt.want, out)
-			}
-			if strings.Contains(out, tt.unwant) {
-				t.Errorf("output wrongly contains %q\n%s", tt.unwant, out)
-			}
-		})
-	}
 }

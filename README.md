@@ -8,10 +8,11 @@ standards to every new repository, generate one that arrives with CI, docs,
 tests, coding standards, security rules and a composed `CLAUDE.md` from the
 first commit.
 
-> **Status: milestone 1 of 4.** The plugin architecture, CLI, validation, the
-> interactive `create` flow and safe workspace creation are complete and
-> tested. **File generation is not implemented yet** — `create` creates the
-> repository directory and stops. See [docs/roadmap.md](docs/roadmap.md).
+> **Status: milestone 1 of 4.** The plugin architecture, CLI, validation,
+> the interactive `create` flow, safe workspace creation and Git
+> initialisation are complete and tested. **File generation is not
+> implemented yet** — `create` produces the repository directory with `.git`
+> inside it and stops. See [docs/roadmap.md](docs/roadmap.md).
 
 ## Install
 
@@ -85,15 +86,16 @@ GitHub Actions: Yes
 ? Create this project? Yes
 Configuration accepted.
 Created C:\Projects\payment-api
+Initialised an empty Git repository on branch main
 No files were written; template generation lands in the next milestone.
 ```
 
 The package manager question is asked only when the language offers a choice:
 Go has one, so it is skipped; Node.js, Python and Java have several.
 
-> **This milestone stops there.** `create` resolves and validates the
-> configuration, confirms it, then creates the repository directory. It writes
-> no files into it and initialises no Git repository.
+> **This milestone stops there.** `create` creates the repository directory
+> and initialises Git inside it. It writes no files into it, makes no
+> commits and configures no remotes.
 
 **Or fully from flags, with no prompts.**
 
@@ -102,7 +104,7 @@ claude-repo-factory create widget \
   --language go \
   --type api \
   --description "Widget control plane" \
-  --dir C:\Projects \
+  --dir services/widget \
   --set go_module=github.com/acme/widget \
   --yes
 ```
@@ -157,6 +159,24 @@ Creation is deliberately conservative:
   factory never overwrites someone's work;
 - nothing is created until the configuration has passed validation;
 - nothing is ever written outside the output directory.
+
+### Git
+
+Unless `--no-git` is given, the repository directory is initialised as a Git
+repository on the branch named by `--branch` (default `main`):
+
+```
+payment-api/
+└── .git/
+```
+
+That is all Git does in this milestone: **no commits, no remotes, nothing
+that touches a network.** Git is invoked as a fixed executable with a fixed
+argument list — never a shell string — and only ever with the generated
+project directory as its working directory.
+
+If Git is not installed, `create` says so and points at the installer, and
+suggests `--no-git` if you would rather skip the step.
 
 ### Exit codes
 

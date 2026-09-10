@@ -76,7 +76,8 @@ prompts, which is what CI and scripts should do.
 Answers are validated, printed as a summary and confirmed before anything
 happens. On confirmation the repository directory is created inside the
 output directory: --dir C:\Projects with the name payment-api creates
-C:\Projects\payment-api.
+C:\Projects\payment-api, and git is initialised inside it unless --no-git
+is given.
 
 An existing empty directory is adopted; an existing non-empty one is refused
 and left untouched. File generation is not implemented in this milestone, so
@@ -144,9 +145,9 @@ func runNew(app *App, cmd *cobra.Command, name string, opts *newOptions) error {
 	}
 
 	// The summary's Output Directory row is the parent, because that is the
-	// question the user answered. The confirmation must not rely on them
-	// doing the join in their head, so the actual target is stated here,
-	// immediately above the prompt that authorises creating it.
+	// question the user answered. The confirmation must not rely on them doing
+	// the join in their head, so the actual target is stated here, immediately
+	// above the prompt that authorises creating it.
 	target, targetErr := cfg.ResolvedProjectDirectory()
 	if targetErr != nil {
 		return fmt.Errorf("resolve target directory: %w", targetErr)
@@ -174,6 +175,9 @@ func runNew(app *App, cmd *cobra.Command, name string, opts *newOptions) error {
 	} else {
 		fmt.Fprintf(out, "Using existing empty directory %s\n", result.Path)
 	}
+	if result.GitInitialized {
+		fmt.Fprintf(out, "Initialised an empty Git repository on branch %s\n", cfg.DefaultBranch)
+	}
 
 	// File generation is deliberately not wired up yet. Asking the plugin
 	// keeps this honest: when Files stops returning ErrNotImplemented the
@@ -186,9 +190,8 @@ func runNew(app *App, cmd *cobra.Command, name string, opts *newOptions) error {
 }
 
 // explainPrepareFailure turns a workspace failure into a message that tells
-// the user what to do about it. Refusing to overwrite is the one failure a
-// user is most likely to hit, and "not empty" alone does not say how to
-// proceed.
+// the user what to do about it. Refusing to overwrite is the failure a user is
+// most likely to hit, and "not empty" alone does not say how to proceed.
 func explainPrepareFailure(err error, cfg config.ProjectConfig) error {
 	if !errors.Is(err, filesystem.ErrNotEmpty) {
 		return err
