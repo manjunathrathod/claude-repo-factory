@@ -1,6 +1,7 @@
 package config_test
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -95,10 +96,10 @@ func TestResolvedOutputDirectory(t *testing.T) {
 		output   string
 		wantBase string
 	}{
-		{name: "empty output uses the project name", project: "widget", output: "", wantBase: "widget"},
-		{name: "explicit output is used", project: "widget", output: "elsewhere", wantBase: "elsewhere"},
-		{name: "nested output", project: "widget", output: "projects/widget", wantBase: "widget"},
-		{name: "whitespace output falls back", project: "widget", output: "   ", wantBase: "widget"},
+		{name: "empty output is the working directory", project: "widget", output: "", wantBase: filepath.Base(mustGetwd(t))},
+		{name: "whitespace output is the working directory", project: "widget", output: "   ", wantBase: filepath.Base(mustGetwd(t))},
+		{name: "explicit output is used as the parent", project: "widget", output: "elsewhere", wantBase: "elsewhere"},
+		{name: "nested output", project: "widget", output: "projects/team", wantBase: "team"},
 	}
 
 	for _, tt := range tests {
@@ -213,5 +214,57 @@ func TestParseNormalisesLanguageAndPackageManager(t *testing.T) {
 	}
 	if got := config.ParsePackageManager(" NPM "); got != "npm" {
 		t.Errorf("ParsePackageManager = %q, want npm", got)
+	}
+}
+
+// mustGetwd returns the working directory or fails the test.
+func mustGetwd(t *testing.T) string {
+	t.Helper()
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	return cwd
+}
+
+// ResolvedOutputDirectory is the parent; ResolvedProjectDirectory is the
+// repository itself. An empty OutputDirectory means the working directory, so
+// both still agree on <cwd>/<project> in the common case.
+func TestResolvedProjectDirectory(t *testing.T) {
+	tests := []struct {
+		name    string
+		project string
+		output  string
+	}{
+		{name: "explicit parent", project: "payment-api", output: "projects"},
+		{name: "nested parent", project: "payment-api", output: "projects/team"},
+		{name: "no parent", project: "payment-api", output: ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := config.Default()
+			c.ProjectName = tt.project
+			c.OutputDirectory = tt.output
+
+			base, err := c.ResolvedOutputDirectory()
+			if err != nil {
+				t.Fatalf("ResolvedOutputDirectory() error = %v", err)
+			}
+			got, err := c.ResolvedProjectDirectory()
+			if err != nil {
+				t.Fatalf("ResolvedProjectDirectory() error = %v", err)
+			}
+
+			if want := filepath.Join(base, tt.project); got != want {
+				t.Errorf("ResolvedProjectDirectory() = %q, want %q", got, want)
+			}
+			if filepath.Base(got) != tt.project {
+				t.Errorf("ResolvedProjectDirectory() = %q, want it to end in the project name", got)
+			}
+			if filepath.Dir(got) != base {
+				t.Errorf("parent of %q = %q, want %q", got, filepath.Dir(got), base)
+			}
+		})
 	}
 }

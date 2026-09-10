@@ -3,6 +3,7 @@ package cli_test
 import (
 	"errors"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -398,16 +399,28 @@ func TestCreateDefaults(t *testing.T) {
 	}
 }
 
-func TestCreateOutputDirectoryDefaultsToTheProjectName(t *testing.T) {
+func TestCreateOutputDirectoryDefaultsToTheWorkingDirectory(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+
 	out, _, err := run(t, nil, "create", "widget", "-l", "go", "--yes")
 	if err != nil {
 		t.Fatalf("create error = %v\n%s", err, out)
 	}
-	// Resolved to an absolute path so the user confirms what would be
-	// written, and ending in the project name.
+
+	// The output directory is the PARENT, so it must be the working directory
+	// itself and must NOT end in the project name — defaulting it to the
+	// project name is what once nested the repository at <cwd>/widget/widget.
 	line := summaryValue(t, out, "Output Directory")
-	if !strings.HasSuffix(line, "widget") {
-		t.Errorf("output directory = %q, want it to end in the project name", line)
+	if !filepath.IsAbs(line) {
+		t.Errorf("output directory = %q, want an absolute path", line)
+	}
+	if filepath.Base(line) == "widget" {
+		t.Errorf("output directory = %q; the parent must not be the project name", line)
+	}
+	// The stated target, however, must end in the project name.
+	if !strings.Contains(out, filepath.Join(line, "widget")) {
+		t.Errorf("output does not state the target %q\n%s", filepath.Join(line, "widget"), out)
 	}
 }
 

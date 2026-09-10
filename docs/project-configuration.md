@@ -37,7 +37,7 @@ if err := cfg.Validate(registry); err != nil {
 | `Language` | `Language` | — | Required. A canonical plugin id, never an alias |
 | `ProjectType` | `ProjectType` | — | Required. `api`, `cli`, `library` or `worker` |
 | `PackageManager` | `PackageManager` | — | Required. Valid values depend on the language |
-| `OutputDirectory` | `string` | `ProjectName` | Where the repository is created |
+| `OutputDirectory` | `string` | working directory | The directory the repository is created **inside** |
 | `DefaultBranch` | `string` | `main` | Initial branch |
 | `Remote` | `string` | — | Optional origin URL |
 | `InitializeGit` | `bool` | `true` | Initialise a Git repository |

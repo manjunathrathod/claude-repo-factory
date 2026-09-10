@@ -141,17 +141,35 @@ func (c ProjectConfig) OptionKeys() []string {
 	return keys
 }
 
-// ResolvedOutputDirectory returns the absolute directory the repository will
-// be created in. An empty OutputDirectory resolves to ProjectName under the
+// ResolvedOutputDirectory returns the absolute directory the repository
+// directory will be created *inside*. An empty OutputDirectory resolves to the
 // working directory.
+//
+// This is the parent, not the repository itself: with ProjectName "payment-api"
+// and OutputDirectory "C:\\Projects", this returns "C:\\Projects" and the
+// repository is created at "C:\\Projects\\payment-api". Keeping the two apart
+// is what lets the filesystem layer treat the parent as a boundary and the
+// project name as a single segment inside it. See ADR 0004.
 //
 // Call Validate first: this method resolves a path, it does not vet one.
 func (c ProjectConfig) ResolvedOutputDirectory() (string, error) {
 	dir := strings.TrimSpace(c.OutputDirectory)
 	if dir == "" {
-		dir = c.ProjectName
+		dir = "."
 	}
 	return filepath.Abs(dir)
+}
+
+// ResolvedProjectDirectory returns the absolute path of the repository
+// directory itself: the output directory with ProjectName joined onto it.
+//
+// Call Validate first: this method resolves a path, it does not vet one.
+func (c ProjectConfig) ResolvedProjectDirectory() (string, error) {
+	base, err := c.ResolvedOutputDirectory()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(base, c.ProjectName), nil
 }
 
 // HasLicense reports whether a licence file should be generated.

@@ -2,27 +2,73 @@ package cli_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
 
 	"github.com/manjunathrathod/claude-repo-factory/internal/cli"
+	"github.com/manjunathrathod/claude-repo-factory/internal/config"
+	"github.com/manjunathrathod/claude-repo-factory/internal/generator"
 	"github.com/manjunathrathod/claude-repo-factory/internal/lang"
 	"github.com/manjunathrathod/claude-repo-factory/internal/plugin"
 	"github.com/manjunathrathod/claude-repo-factory/internal/prompt"
 )
 
+// fakePath is what the stub reports as the created directory. It is a fixed
+// sentinel rather than ResolvedProjectDirectory: computing it the way the
+// production code does would make any test asserting on the printed path agree
+// with whatever that method happens to do, bug included.
+const fakePath = "<fake>/created-directory"
+
+// fakeGenerator records what the command asked to be created without touching
+// a filesystem. It is the default for CLI tests: the command layer's job is to
+// resolve a configuration and hand it over, and a test of that should not be
+// able to litter the working tree.
+type fakeGenerator struct {
+	// configs records every configuration Prepare was given, in order.
+	configs []config.ProjectConfig
+	// err, when set, is returned instead of creating anything.
+	err error
+	// created and gitInitialized override the reported flags.
+	created        bool
+	gitInitialized bool
+}
+
+func newFakeGenerator() *fakeGenerator { return &fakeGenerator{created: true, gitInitialized: true} }
+
+func (f *fakeGenerator) Prepare(_ context.Context, cfg config.ProjectConfig, _ config.Catalog) (generator.Result, error) {
+	f.configs = append(f.configs, cfg)
+	if f.err != nil {
+		return generator.Result{}, f.err
+	}
+	return generator.Result{
+		Path:           fakePath,
+		Created:        f.created,
+		GitInitialized: f.gitInitialized && cfg.InitializeGit,
+	}, nil
+}
+
 // run executes the command tree with the given arguments and returns what it
-// wrote to stdout and stderr.
+// wrote to stdout and stderr. Creation is faked; use runWith to inspect or
+// replace the generator.
 func run(t *testing.T, asker prompt.Asker, args ...string) (stdout, stderr string, err error) {
+	t.Helper()
+	return runWith(t, asker, newFakeGenerator(), args...)
+}
+
+// runWith is run with an explicit workspace preparer, for tests that assert on
+// what the command asked for or that drive the real filesystem.
+func runWith(t *testing.T, asker prompt.Asker, gen cli.Preparer, args ...string) (stdout, stderr string, err error) {
 	t.Helper()
 
 	var out, errOut bytes.Buffer
 	app := &cli.App{
-		Registry: lang.Registry(),
-		Asker:    asker,
-		Out:      &out,
-		Err:      &errOut,
+		Registry:  lang.Registry(),
+		Asker:     asker,
+		Out:       &out,
+		Err:       &errOut,
+		Generator: gen,
 	}
 	root := cli.NewRootCommand(app)
 	root.SetArgs(args)
