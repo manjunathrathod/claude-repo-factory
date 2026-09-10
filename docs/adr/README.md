@@ -46,4 +46,5 @@ ways.
 | [0001](0001-plugin-registry-for-language-support.md) | Plugin registry for language support | Accepted |
 | [0002](0002-defer-repository-generation.md) | Defer repository generation to a second milestone | Accepted |
 | [0003](0003-typed-project-configuration-model.md) | Type the project configuration model and validate it against the registry | Accepted |
-| [0004](0004-workspace-creation-and-git-initialisation.md) | The output directory is the parent; creation and git sit behind services | Accepted |
+| [0004](0004-output-directory-is-the-parent.md) | The output directory is the parent, and creation lives behind a filesystem service | Accepted |
+| [0005](0005-git-initialisation-behind-a-narrow-service.md) | Git initialisation sits behind a narrow, fixed-argument service | Accepted |

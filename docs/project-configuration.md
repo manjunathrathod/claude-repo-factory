@@ -60,6 +60,21 @@ path and a Maven group id are both just entries, keyed by constants the owning
 plugin declares (`lang.OptGoModule`). The core moves them without interpreting
 them.
 
+
+The output directory is the **parent**. `ResolvedOutputDirectory` returns it;
+`ResolvedProjectDirectory` returns it with `ProjectName` joined on, which is
+the repository itself:
+
+```
+OutputDirectory C:\Projects  +  ProjectName payment-api
+  ResolvedOutputDirectory  -> C:\Projects
+  ResolvedProjectDirectory -> C:\Projects\payment-api
+```
+
+Keeping them apart is what lets `internal/filesystem` treat the parent as a
+boundary and the project name as a single segment inside it. An empty
+`OutputDirectory` means the working directory, so both resolve to
+`<cwd>/<ProjectName>` in the common case.
 ## The typed vocabulary
 
 ```go
