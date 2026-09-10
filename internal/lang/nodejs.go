@@ -3,12 +3,20 @@ package lang
 import (
 	"strings"
 
+	"github.com/manjunathrathod/claude-repo-factory/internal/config"
 	"github.com/manjunathrathod/claude-repo-factory/internal/plugin"
-	"github.com/manjunathrathod/claude-repo-factory/internal/spec"
 )
 
 // OptPackageName is the npm package name for Node.js repositories.
 const OptPackageName = "package_name"
+
+// Node.js package managers. Package manager identifiers are ecosystem
+// knowledge, so they live beside the plugin that owns them, never in the core.
+const (
+	PMNpm  config.PackageManager = "npm"
+	PMPnpm config.PackageManager = "pnpm"
+	PMYarn config.PackageManager = "yarn"
+)
 
 func init() { register(nodejs) }
 
@@ -20,20 +28,23 @@ var nodejs = &Definition{
 		Aliases:     []string{"node", "ts", "typescript", "javascript", "js"},
 		Status:      plugin.StatusStable,
 		ProjectTypes: []plugin.ProjectType{
-			{ID: "cli", DisplayName: "CLI", Summary: "Command line tool published to npm"},
-			{ID: "library", DisplayName: "Library", Summary: "Reusable package with a public API"},
-			{ID: "service", DisplayName: "HTTP service", Summary: "Long running HTTP or worker service"},
+			{ID: config.ProjectTypeAPI, DisplayName: "API", Summary: "HTTP service on Node.js"},
+			{ID: config.ProjectTypeCLI, DisplayName: "CLI", Summary: "Command line tool published to npm"},
+			{ID: config.ProjectTypeLibrary, DisplayName: "Library", Summary: "Reusable package with a public API"},
+			{ID: config.ProjectTypeWorker, DisplayName: "Worker", Summary: "Queue consumer or scheduled job"},
 		},
-		DefaultProjectType: "library",
+		DefaultProjectType:    config.ProjectTypeLibrary,
+		PackageManagers:       []config.PackageManager{PMNpm, PMPnpm, PMYarn},
+		DefaultPackageManager: PMNpm,
 	},
 	RequiredOptions: []OptionSpec{{
 		Key:      OptPackageName,
 		Prompt:   "npm package name",
 		Help:     "Published package name, for example @acme/widget or widget.",
 		Required: true,
-		Default:  func(s spec.Spec) string { return strings.ToLower(s.Name) },
+		Default:  func(c config.ProjectConfig) string { return strings.ToLower(c.ProjectName) },
 	}},
-	Instruct: func(s spec.Spec) plugin.Instructions {
+	Instruct: func(c config.ProjectConfig) plugin.Instructions {
 		return plugin.Instructions{
 			Toolchain: strings.Join([]string{
 				"- Node.js 22 LTS, pinned in `.nvmrc` and in the `engines` field of `package.json`.",

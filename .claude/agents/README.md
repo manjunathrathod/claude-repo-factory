@@ -87,7 +87,7 @@ Every agent follows [`../../CLAUDE.md`](../../CLAUDE.md). Three rules matter
 enough to repeat:
 
 1. The core never learns a language name. No `switch` on a language in
-   `internal/spec`, `internal/cli`, `internal/render` or `internal/plugin`.
+   `internal/config`, `internal/cli`, `internal/render` or `internal/plugin`.
 2. Validation runs in one fixed order — gofmt, `go vet ./...`,
    `go test ./...`, `golangci-lint run`, `go build ./...` — via
    `scripts/check.sh`. Report what you actually ran and what it actually

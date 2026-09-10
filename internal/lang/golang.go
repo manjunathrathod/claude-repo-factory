@@ -3,12 +3,16 @@ package lang
 import (
 	"strings"
 
+	"github.com/manjunathrathod/claude-repo-factory/internal/config"
 	"github.com/manjunathrathod/claude-repo-factory/internal/plugin"
-	"github.com/manjunathrathod/claude-repo-factory/internal/spec"
 )
 
 // OptGoModule is the module path for Go repositories.
 const OptGoModule = "go_module"
+
+// Go has exactly one dependency tool, but it is declared like any other so
+// the model never needs a special case for a single-manager language.
+const PMGoModules config.PackageManager = "gomod"
 
 func init() { register(golang) }
 
@@ -20,20 +24,23 @@ var golang = &Definition{
 		Aliases:     []string{"golang"},
 		Status:      plugin.StatusStable,
 		ProjectTypes: []plugin.ProjectType{
-			{ID: "cli", DisplayName: "CLI", Summary: "Cobra based command line tool"},
-			{ID: "library", DisplayName: "Library", Summary: "Importable module with a public API"},
-			{ID: "service", DisplayName: "HTTP service", Summary: "HTTP or gRPC service"},
+			{ID: config.ProjectTypeAPI, DisplayName: "API", Summary: "HTTP or gRPC service"},
+			{ID: config.ProjectTypeCLI, DisplayName: "CLI", Summary: "Cobra based command line tool"},
+			{ID: config.ProjectTypeLibrary, DisplayName: "Library", Summary: "Importable module with a public API"},
+			{ID: config.ProjectTypeWorker, DisplayName: "Worker", Summary: "Queue consumer or scheduled job"},
 		},
-		DefaultProjectType: "cli",
+		DefaultProjectType:    config.ProjectTypeCLI,
+		PackageManagers:       []config.PackageManager{PMGoModules},
+		DefaultPackageManager: PMGoModules,
 	},
 	RequiredOptions: []OptionSpec{{
 		Key:      OptGoModule,
 		Prompt:   "Go module path",
 		Help:     "Fully qualified module path, for example github.com/acme/widget.",
 		Required: true,
-		Default:  func(s spec.Spec) string { return "github.com/example/" + strings.ToLower(s.Name) },
+		Default:  func(c config.ProjectConfig) string { return "github.com/example/" + strings.ToLower(c.ProjectName) },
 	}},
-	Instruct: func(s spec.Spec) plugin.Instructions {
+	Instruct: func(c config.ProjectConfig) plugin.Instructions {
 		return plugin.Instructions{
 			Toolchain: strings.Join([]string{
 				"- Go 1.24 or newer, pinned by the `go` directive in `go.mod`.",

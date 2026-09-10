@@ -3,14 +3,20 @@ package lang
 import (
 	"strings"
 
+	"github.com/manjunathrathod/claude-repo-factory/internal/config"
 	"github.com/manjunathrathod/claude-repo-factory/internal/plugin"
-	"github.com/manjunathrathod/claude-repo-factory/internal/spec"
 )
 
 // Java specific option keys.
 const (
 	OptJavaGroupID    = "java_group_id"
 	OptJavaArtifactID = "java_artifact_id"
+)
+
+// JVM build tools.
+const (
+	PMMaven  config.PackageManager = "maven"
+	PMGradle config.PackageManager = "gradle"
 )
 
 func init() { register(java) }
@@ -23,11 +29,14 @@ var java = &Definition{
 		Aliases:     []string{"jvm"},
 		Status:      plugin.StatusStable,
 		ProjectTypes: []plugin.ProjectType{
-			{ID: "library", DisplayName: "Library", Summary: "Published Maven artifact"},
-			{ID: "service", DisplayName: "Spring Boot service", Summary: "HTTP service on Spring Boot"},
-			{ID: "cli", DisplayName: "CLI", Summary: "Executable jar with a command line interface"},
+			{ID: config.ProjectTypeAPI, DisplayName: "API", Summary: "HTTP service on Spring Boot"},
+			{ID: config.ProjectTypeCLI, DisplayName: "CLI", Summary: "Executable jar with a command line interface"},
+			{ID: config.ProjectTypeLibrary, DisplayName: "Library", Summary: "Published Maven artifact"},
+			{ID: config.ProjectTypeWorker, DisplayName: "Worker", Summary: "Message listener or batch job"},
 		},
-		DefaultProjectType: "service",
+		DefaultProjectType:    config.ProjectTypeAPI,
+		PackageManagers:       []config.PackageManager{PMMaven, PMGradle},
+		DefaultPackageManager: PMMaven,
 	},
 	RequiredOptions: []OptionSpec{
 		{
@@ -35,17 +44,17 @@ var java = &Definition{
 			Prompt:   "Maven groupId",
 			Help:     "Reverse domain identifier, for example com.acme.widget.",
 			Required: true,
-			Default:  func(s spec.Spec) string { return "com.example." + pythonIdentifier(s.Name) },
+			Default:  func(c config.ProjectConfig) string { return "com.example." + pythonIdentifier(c.ProjectName) },
 		},
 		{
 			Key:      OptJavaArtifactID,
 			Prompt:   "Maven artifactId",
 			Help:     "Artifact name, for example widget-service.",
 			Required: true,
-			Default:  func(s spec.Spec) string { return strings.ToLower(s.Name) },
+			Default:  func(c config.ProjectConfig) string { return strings.ToLower(c.ProjectName) },
 		},
 	},
-	Instruct: func(s spec.Spec) plugin.Instructions {
+	Instruct: func(c config.ProjectConfig) plugin.Instructions {
 		return plugin.Instructions{
 			Toolchain: strings.Join([]string{
 				"- Java 21 (LTS), fixed by the maven-compiler-plugin release setting.",

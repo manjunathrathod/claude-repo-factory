@@ -22,7 +22,7 @@ do not skip ahead.
 Before writing code, answer explicitly:
 
 - Does this add language-specific knowledge? If so it belongs in
-  `internal/lang`, not in `internal/cli`, `internal/spec` or `internal/render`.
+  `internal/lang`, not in `internal/cli`, `internal/config` or `internal/render`.
 - Does it require a change to `plugin.Language`? If so, stop and propose an
   ADR in `docs/adr/` before implementing.
 - Does it introduce a new dependency, package-level state, or a network call?

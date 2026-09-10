@@ -23,11 +23,15 @@ import (
 	"strings"
 
 	"github.com/manjunathrathod/claude-repo-factory/internal/plugin"
-	"github.com/manjunathrathod/claude-repo-factory/internal/spec"
+	"github.com/manjunathrathod/claude-repo-factory/internal/config"
 )
 
 // OptRustCrateName is the crate name for Rust repositories.
 const OptRustCrateName = "rust_crate_name"
+
+// PMCargo is Rust's package manager. Package manager identifiers are ecosystem
+// knowledge, so they live beside the plugin that owns them, never in the core.
+const PMCargo config.PackageManager = "cargo"
 
 func init() { register(rust) }
 
@@ -39,19 +43,21 @@ var rust = &Definition{
 		Aliases:     []string{"rs"},
 		Status:      plugin.StatusStable,
 		ProjectTypes: []plugin.ProjectType{
-			{ID: "cli", DisplayName: "CLI", Summary: "Binary crate with clap"},
-			{ID: "library", DisplayName: "Library", Summary: "Published crate"},
+			{ID: config.ProjectTypeCLI, DisplayName: "CLI", Summary: "Binary crate with clap"},
+			{ID: config.ProjectTypeLibrary, DisplayName: "Library", Summary: "Published crate"},
 		},
-		DefaultProjectType: "cli",
+		DefaultProjectType:    config.ProjectTypeCLI,
+		PackageManagers:       []config.PackageManager{PMCargo},
+		DefaultPackageManager: PMCargo,
 	},
 	RequiredOptions: []OptionSpec{{
 		Key:      OptRustCrateName,
 		Prompt:   "Crate name",
 		Help:     "Cargo crate name; lowercase with underscores.",
 		Required: true,
-		Default:  func(s spec.Spec) string { return pythonIdentifier(s.Name) },
+		Default:  func(c config.ProjectConfig) string { return pythonIdentifier(c.ProjectName) },
 	}},
-	Instruct: func(s spec.Spec) plugin.Instructions {
+	Instruct: func(c config.ProjectConfig) plugin.Instructions {
 		return plugin.Instructions{
 			Toolchain:    strings.Join([]string{"- ..."}, "\n"),
 			Standards:    strings.Join([]string{"- ..."}, "\n"),
@@ -76,8 +82,10 @@ var rust = &Definition{
 | `ID` | Lowercase, stable, used in `--language`. Never changes once released. |
 | `Aliases` | Must not collide with another plugin or with any id. The registry rejects collisions at start-up. |
 | `Status` | `plugin.StatusStable` once complete; `plugin.StatusPlanned` reserves the name. |
-| `ProjectTypes` | At least two. Each needs an id, display name and summary. |
+| `ProjectTypes` | At least one, each id drawn from the closed factory vocabulary: `api`, `cli`, `library`, `worker`. A plugin may narrow the set, never widen it. |
 | `DefaultProjectType` | Must be one of the declared project types, or registration panics. |
+| `PackageManagers` | At least one for a stable plugin. Declared as constants beside the plugin. |
+| `DefaultPackageManager` | Must be one of the declared package managers. |
 
 ### Option rules
 

@@ -15,6 +15,7 @@ repositories pre-configured for professional development and Claude Code.
 | Document | What it covers |
 | --- | --- |
 | [architecture.md](architecture.md) | How the packages fit together and where the plugin boundary sits |
+| [project-configuration.md](project-configuration.md) | The typed configuration model, its defaults and its validation rules |
 | [adding-a-language.md](adding-a-language.md) | Step by step for a new language or framework plugin |
 | [coding-standards.md](coding-standards.md) | The Go standards enforced in this repository |
 | [testing.md](testing.md) | Test strategy, house style and what must stay covered |

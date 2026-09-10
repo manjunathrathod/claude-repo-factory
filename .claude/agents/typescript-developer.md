@@ -35,7 +35,7 @@ Follow `docs/adding-a-language.md` exactly; it is the contract, and
   `internal/lang`.
 - `OptPackageName` is the option key this plugin owns. Its `Default` derives a
   valid npm name from `spec.Name` so `--yes` produces a working repository.
-- The plugin must not mutate the `spec.Spec` it is handed.
+- The plugin must not mutate the `config.ProjectConfig` it is handed.
 - Aliases (`node`, `ts`, `typescript`, `javascript`, `js`) must not collide
   with another plugin; the registry rejects collisions at start-up.
 

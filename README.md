@@ -105,7 +105,7 @@ Full detail: [docs/generated-repository.md](docs/generated-repository.md).
 
 ## Design
 
-The core never learns a language name. `internal/spec`, `internal/cli`,
+The core never learns a language name. `internal/config`, `internal/cli`,
 `internal/render` and `internal/plugin` contain no reference to Go, Python,
 Node.js or Java; all language knowledge lives in `internal/lang`, behind a
 single `plugin.Language` interface.
@@ -114,6 +114,7 @@ Adding a language means adding one file to `internal/lang` and one line to a
 test table. Nothing in the core changes — and `git diff --name-only` proves it.
 
 - [docs/architecture.md](docs/architecture.md) — how the pieces fit
+- [docs/project-configuration.md](docs/project-configuration.md) — the typed configuration model and its validation
 - [docs/adding-a-language.md](docs/adding-a-language.md) — the contributor workflow
 - [docs/adr/0001](docs/adr/0001-plugin-registry-for-language-support.md) — why it is built this way
 

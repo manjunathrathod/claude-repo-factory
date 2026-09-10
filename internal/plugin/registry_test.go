@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/manjunathrathod/claude-repo-factory/internal/config"
 	"github.com/manjunathrathod/claude-repo-factory/internal/plugin"
-	"github.com/manjunathrathod/claude-repo-factory/internal/spec"
 )
 
 // fake is a minimal Language used to exercise the registry without depending
@@ -14,13 +14,29 @@ type fake struct {
 	desc plugin.Descriptor
 }
 
-func (f fake) Descriptor() plugin.Descriptor              { return f.desc }
-func (f fake) Instructions(spec.Spec) plugin.Instructions { return plugin.Instructions{} }
-func (f fake) Files(spec.Spec) ([]plugin.FileSpec, error) { return nil, plugin.ErrNotImplemented }
-func (f fake) Validate(spec.Spec) error                   { return nil }
+func (f fake) Descriptor() plugin.Descriptor                         { return f.desc }
+func (f fake) Instructions(config.ProjectConfig) plugin.Instructions { return plugin.Instructions{} }
+func (f fake) Files(config.ProjectConfig) ([]plugin.FileSpec, error) {
+	return nil, plugin.ErrNotImplemented
+}
+func (f fake) Validate(config.ProjectConfig) error { return nil }
 
-func stable(id string, aliases ...string) fake {
-	return fake{desc: plugin.Descriptor{ID: id, DisplayName: id, Status: plugin.StatusStable, Aliases: aliases}}
+// stable builds a minimally complete stable plugin: the registry now requires
+// project types and package managers from anything claiming to be stable.
+func stable(id config.Language, aliases ...string) fake {
+	return fake{desc: plugin.Descriptor{
+		ID:          id,
+		DisplayName: string(id),
+		Status:      plugin.StatusStable,
+		Aliases:     aliases,
+		ProjectTypes: []plugin.ProjectType{
+			{ID: config.ProjectTypeLibrary, DisplayName: "Library"},
+			{ID: config.ProjectTypeCLI, DisplayName: "CLI"},
+		},
+		DefaultProjectType:    config.ProjectTypeLibrary,
+		PackageManagers:       []config.PackageManager{"pm"},
+		DefaultPackageManager: "pm",
+	}}
 }
 
 func TestRegisterAndLookup(t *testing.T) {
@@ -92,10 +108,12 @@ func TestRegisterRejectsBadPlugins(t *testing.T) {
 			name: "unknown default project type",
 			setup: func(r *plugin.Registry) error {
 				return r.Register(fake{desc: plugin.Descriptor{
-					ID:                 "go",
-					Status:             plugin.StatusStable,
-					ProjectTypes:       []plugin.ProjectType{{ID: "cli"}},
-					DefaultProjectType: "service",
+					ID:                    "go",
+					Status:                plugin.StatusStable,
+					ProjectTypes:          []plugin.ProjectType{{ID: config.ProjectTypeCLI}},
+					DefaultProjectType:    config.ProjectTypeAPI,
+					PackageManagers:       []config.PackageManager{"pm"},
+					DefaultPackageManager: "pm",
 				}})
 			},
 			wantErr: "unknown default project type",
@@ -122,8 +140,8 @@ func TestListIsSortedAndAvailableFiltersPlanned(t *testing.T) {
 	r.MustRegister(fake{desc: plugin.Descriptor{ID: "rust", Status: plugin.StatusPlanned}})
 
 	ids := r.IDs()
-	want := []string{"go", "python", "rust"}
-	if strings.Join(ids, ",") != strings.Join(want, ",") {
+	want := []config.Language{"go", "python", "rust"}
+	if config.JoinLanguages(ids, ",") != config.JoinLanguages(want, ",") {
 		t.Errorf("IDs() = %v, want %v", ids, want)
 	}
 
@@ -167,15 +185,18 @@ func TestMustRegisterPanicsOnDuplicate(t *testing.T) {
 }
 
 func TestDescriptorProjectTypeHelpers(t *testing.T) {
-	d := plugin.Descriptor{ProjectTypes: []plugin.ProjectType{{ID: "cli"}, {ID: "service"}}}
+	d := plugin.Descriptor{ProjectTypes: []plugin.ProjectType{
+		{ID: config.ProjectTypeCLI},
+		{ID: config.ProjectTypeAPI},
+	}}
 
-	if got := strings.Join(d.ProjectTypeIDs(), ","); got != "cli,service" {
-		t.Errorf("ProjectTypeIDs() = %q, want cli,service", got)
+	if got := config.JoinProjectTypes(d.ProjectTypeIDs(), ","); got != "cli,api" {
+		t.Errorf("ProjectTypeIDs() = %q, want cli,api", got)
 	}
-	if !d.HasProjectType("service") {
-		t.Error("HasProjectType(service) = false, want true")
+	if !d.HasProjectType(config.ProjectTypeAPI) {
+		t.Error("HasProjectType(api) = false, want true")
 	}
-	if d.HasProjectType("library") {
+	if d.HasProjectType(config.ProjectTypeLibrary) {
 		t.Error("HasProjectType(library) = true, want false")
 	}
 }
@@ -196,5 +217,165 @@ func TestRegistryIsSafeForConcurrentUse(t *testing.T) {
 	}
 	for i := 0; i < 8; i++ {
 		<-done
+	}
+}
+
+func TestRegistryIsACatalog(t *testing.T) {
+	r := plugin.NewRegistry()
+	r.MustRegister(stable("go", "golang"))
+	r.MustRegister(stable("python", "py"))
+	r.MustRegister(fake{desc: plugin.Descriptor{ID: "rust", Status: plugin.StatusPlanned}})
+
+	t.Run("Languages excludes planned plugins", func(t *testing.T) {
+		// A planned language is announced in listings but must never pass
+		// validation, so the catalog view must not include it.
+		got := config.JoinLanguages(r.Languages(), ",")
+		if got != "go,python" {
+			t.Fatalf("Languages() = %q, want go,python", got)
+		}
+	})
+
+	t.Run("Resolve maps an alias to the canonical id", func(t *testing.T) {
+		tests := map[string]config.Language{
+			"golang": "go",
+			"GOLANG": "go",
+			"  py  ": "python",
+			"go":     "go",
+		}
+		for input, want := range tests {
+			got, ok := r.Resolve(input)
+			if !ok {
+				t.Errorf("Resolve(%q) = not found", input)
+				continue
+			}
+			if got != want {
+				t.Errorf("Resolve(%q) = %q, want %q", input, got, want)
+			}
+		}
+	})
+
+	t.Run("Resolve rejects the unknown", func(t *testing.T) {
+		if _, ok := r.Resolve("cobol"); ok {
+			t.Error("Resolve(cobol) = found, want not found")
+		}
+		if _, ok := r.Resolve(""); ok {
+			t.Error("Resolve on an empty name = found, want not found")
+		}
+	})
+
+	t.Run("ProjectTypes and PackageManagers of a known language", func(t *testing.T) {
+		if got := config.JoinProjectTypes(r.ProjectTypes("go"), ","); got != "library,cli" {
+			t.Errorf("ProjectTypes(go) = %q, want library,cli", got)
+		}
+		if got := config.JoinPackageManagers(r.PackageManagers("go"), ","); got != "pm" {
+			t.Errorf("PackageManagers(go) = %q, want pm", got)
+		}
+	})
+
+	t.Run("an unknown language yields nothing rather than panicking", func(t *testing.T) {
+		if got := r.ProjectTypes("cobol"); got != nil {
+			t.Errorf("ProjectTypes(cobol) = %v, want nil", got)
+		}
+		if got := r.PackageManagers("cobol"); got != nil {
+			t.Errorf("PackageManagers(cobol) = %v, want nil", got)
+		}
+	})
+
+	t.Run("PackageManagers cannot be mutated through the catalog", func(t *testing.T) {
+		got := r.PackageManagers("go")
+		if len(got) == 0 {
+			t.Fatal("PackageManagers(go) returned nothing")
+		}
+		got[0] = "tampered"
+
+		if again := r.PackageManagers("go"); again[0] != "pm" {
+			t.Fatal("the catalog handed out a slice aliasing the descriptor")
+		}
+	})
+}
+
+func TestRegisterRejectsIncompleteStablePlugins(t *testing.T) {
+	// A stable plugin that cannot answer the catalog would fail validation at
+	// generation time; catching it at start-up is the whole point.
+	base := func() plugin.Descriptor {
+		return plugin.Descriptor{
+			ID:                    "go",
+			Status:                plugin.StatusStable,
+			ProjectTypes:          []plugin.ProjectType{{ID: config.ProjectTypeCLI}},
+			DefaultProjectType:    config.ProjectTypeCLI,
+			PackageManagers:       []config.PackageManager{"pm"},
+			DefaultPackageManager: "pm",
+		}
+	}
+
+	tests := []struct {
+		name    string
+		mutate  func(*plugin.Descriptor)
+		wantErr string
+	}{
+		{name: "complete", mutate: nil},
+		{
+			name:    "no project types",
+			mutate:  func(d *plugin.Descriptor) { d.ProjectTypes = nil; d.DefaultProjectType = "" },
+			wantErr: "declares no project types",
+		},
+		{
+			name:    "no package managers",
+			mutate:  func(d *plugin.Descriptor) { d.PackageManagers = nil; d.DefaultPackageManager = "" },
+			wantErr: "declares no package managers",
+		},
+		{
+			name:    "default package manager not in the set",
+			mutate:  func(d *plugin.Descriptor) { d.DefaultPackageManager = "other" },
+			wantErr: "unknown default package manager",
+		},
+		{
+			name: "project type outside the factory vocabulary",
+			mutate: func(d *plugin.Descriptor) {
+				d.ProjectTypes = []plugin.ProjectType{{ID: "service"}}
+				d.DefaultProjectType = "service"
+			},
+			wantErr: "not in the factory vocabulary",
+		},
+		{
+			name:    "no default project type",
+			mutate:  func(d *plugin.Descriptor) { d.DefaultProjectType = "" },
+			wantErr: "declares no default project type",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			d := base()
+			if tt.mutate != nil {
+				tt.mutate(&d)
+			}
+
+			err := plugin.NewRegistry().Register(fake{desc: d})
+
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("Register() = %v, want nil", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("Register() = nil, want an error containing %q", tt.wantErr)
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("Register() = %v, want an error containing %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+// A planned plugin is held to a lighter standard: it exists to reserve a name.
+func TestRegisterAcceptsAMinimalPlannedPlugin(t *testing.T) {
+	err := plugin.NewRegistry().Register(fake{desc: plugin.Descriptor{
+		ID:     "rust",
+		Status: plugin.StatusPlanned,
+	}})
+	if err != nil {
+		t.Fatalf("Register() = %v, want nil", err)
 	}
 }

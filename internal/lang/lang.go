@@ -10,8 +10,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/manjunathrathod/claude-repo-factory/internal/config"
 	"github.com/manjunathrathod/claude-repo-factory/internal/plugin"
-	"github.com/manjunathrathod/claude-repo-factory/internal/spec"
 )
 
 // defaultRegistry is populated by the init functions in this package.
@@ -40,7 +40,7 @@ type Definition struct {
 
 	// Instruct returns the CLAUDE.md fragments for this language. It must
 	// not be nil.
-	Instruct func(s spec.Spec) plugin.Instructions
+	Instruct func(c config.ProjectConfig) plugin.Instructions
 }
 
 // OptionSpec describes a language-specific answer collected from flags or
@@ -49,28 +49,28 @@ type OptionSpec struct {
 	Key      string
 	Prompt   string
 	Help     string
-	Default  func(s spec.Spec) string
+	Default  func(c config.ProjectConfig) string
 	Required bool
 }
 
 // DefaultValue returns the computed default for an option, or the empty
 // string when the option has none.
-func (o OptionSpec) DefaultValue(s spec.Spec) string {
+func (o OptionSpec) DefaultValue(c config.ProjectConfig) string {
 	if o.Default == nil {
 		return ""
 	}
-	return o.Default(s)
+	return o.Default(c)
 }
 
 // Descriptor implements plugin.Language.
 func (d *Definition) Descriptor() plugin.Descriptor { return d.Meta }
 
 // Instructions implements plugin.Language.
-func (d *Definition) Instructions(s spec.Spec) plugin.Instructions {
+func (d *Definition) Instructions(c config.ProjectConfig) plugin.Instructions {
 	if d.Instruct == nil {
 		return plugin.Instructions{}
 	}
-	return d.Instruct(s)
+	return d.Instruct(c)
 }
 
 // Files implements plugin.Language.
@@ -78,24 +78,23 @@ func (d *Definition) Instructions(s spec.Spec) plugin.Instructions {
 // Repository generation is deliberately not implemented yet: this milestone
 // establishes the plugin contract and the CLI around it. Every built-in
 // plugin reports the same honest error until the generator lands.
-func (d *Definition) Files(spec.Spec) ([]plugin.FileSpec, error) {
+func (d *Definition) Files(config.ProjectConfig) ([]plugin.FileSpec, error) {
 	return nil, fmt.Errorf("%s: %w", d.Meta.ID, plugin.ErrNotImplemented)
 }
 
 // Validate implements plugin.Language.
-func (d *Definition) Validate(s spec.Spec) error {
+func (d *Definition) Validate(c config.ProjectConfig) error {
 	if d.Meta.Status != plugin.StatusStable {
 		return fmt.Errorf("language %q is planned but not available yet", d.Meta.ID)
 	}
-	if pt := strings.TrimSpace(s.ProjectType); pt != "" && !d.Meta.HasProjectType(pt) {
-		return fmt.Errorf("unknown project type %q for %s (available: %s)",
-			pt, d.Meta.ID, strings.Join(d.Meta.ProjectTypeIDs(), ", "))
-	}
+	// Language, project type and package manager are checked by
+	// config.ProjectConfig.Validate against the registry. What is left here is
+	// the genuinely language-specific part: the options this plugin owns.
 	for _, opt := range d.RequiredOptions {
 		if !opt.Required {
 			continue
 		}
-		if strings.TrimSpace(s.Option(opt.Key, "")) == "" {
+		if strings.TrimSpace(c.Option(opt.Key, "")) == "" {
 			return fmt.Errorf("%s requires the %q option (%s)", d.Meta.ID, opt.Key, opt.Prompt)
 		}
 	}
