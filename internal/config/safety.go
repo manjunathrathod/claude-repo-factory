@@ -2,7 +2,6 @@ package config
 
 import (
 	"path"
-	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -89,6 +88,20 @@ func isWindowsReserved(name string) bool {
 	return reserved
 }
 
+// toSlash normalises both separators to "/" on every platform.
+//
+// filepath.ToSlash deliberately is not used: it converts only the host
+// separator, so on Linux it leaves backslashes untouched and `..\..\etc`
+// would sail past the traversal check that the same input fails on Windows.
+// Validation must not depend on where it runs — a configuration is either
+// safe or it is not — so a backslash is treated as a separator everywhere.
+// The cost is that a directory name containing a literal backslash, which is
+// legal on Unix, cannot be used; that is the right trade for a tool whose
+// output is meant to be portable.
+func toSlash(p string) string {
+	return strings.ReplaceAll(p, `\`, "/")
+}
+
 // ValidateOutputDirectory reports whether dir is safe to create a repository
 // in. An empty dir is valid and means "use the project name".
 //
@@ -112,7 +125,7 @@ func ValidateOutputDirectory(dir string) error {
 	// segment is accepted anywhere, even one that would stay inside the base.
 	// A scaffolding target has no legitimate need for one, and a rule with no
 	// exceptions is the only kind that stays correct as callers change.
-	normalised := filepath.ToSlash(dir)
+	normalised := toSlash(dir)
 	for _, segment := range strings.Split(normalised, "/") {
 		if segment == ".." {
 			return newFieldError(ErrPathTraversal, field, dir,
